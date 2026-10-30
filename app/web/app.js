@@ -406,7 +406,7 @@ function drawReview() {
     <div class="muted">阶段三 · 判定</div>
     <h2 style="margin:6px 0 14px;font-size:17px;font-weight:500">${esc(p.title)}</h2>
     <div class="muted" style="margin-bottom:14px">
-      现在是第 ${p.stage || 0} 档。答对 → ${p.stage ? '升一档' : '直接跳到 3 天后'}；未答对 → 回到 1 天后。
+      现在是第 ${p.stage || 0} 档。答对 → ${p.stage ? '升一档' : '直接跳到 3 天后'}；未答对 → 退一档，下次间隔打折。
     </div>
     <label class="field"><span>备注（可空）</span><input id="note" placeholder="卡在哪一步"></label>
     <div class="row end">
@@ -429,7 +429,7 @@ async function submitReview(correct) {
   });
   closeModal();
   if (res.out_pool) toast('答对，走完 5 档，出池了');
-  else toast(correct ? `答对 → 下次 ${res.next_due}` : `未答对 → 明天再来`);
+  else toast(correct ? `答对 → 下次 ${res.next_due}` : `未答对 → 打五折，下次 ${res.next_due}`);
   loadToday();
   refreshGate();
 }
@@ -784,10 +784,9 @@ async function loadSettings() {
         <label class="field"><span>早班新题数</span><input id="s-morning" type="number" value="${st.morning_new}"></label>
         <label class="field"><span>午班到期数</span><input id="s-noon" type="number" value="${st.noon_due}"></label>
         <label class="field"><span>晚班到期数</span><input id="s-evening" type="number" value="${st.evening_due}"></label>
-        <label class="field"><span>通过率阈值</span><input id="s-threshold" type="number" step="0.05" value="${st.pass_threshold}"></label>
-        <label class="field"><span>连续持平几次降档</span><input id="s-hold" type="number" value="${st.hold_limit}"></label>
+        <label class="field"><span>答错时下一次间隔打几折（0.5 = 五折）</span><input id="s-lapse" type="number" step="0.05" min="0.1" max="1" value="${st.lapse_factor}"></label>
       </div>
-      <label class="field"><span>间隔阶梯（天，逗号分隔）</span>
+      <label class="field"><span>间隔阶梯（档位基数，天数，逗号分隔）</span>
         <input id="s-intervals" value="${st.intervals.join(',')}"></label>
       <button class="btn primary" onclick="saveSettings()">保存</button>
     </div>
@@ -826,8 +825,7 @@ async function saveSettings() {
     noon_due: $('#s-noon').value,
     evening_due: $('#s-evening').value,
     daily_minutes: $('#s-minutes').value,
-    pass_threshold: $('#s-threshold').value,
-    hold_limit: $('#s-hold').value,
+    lapse_factor: $('#s-lapse').value,
     interval_days: $('#s-intervals').value,
   };
   await api('/settings', { method: 'PUT', body });

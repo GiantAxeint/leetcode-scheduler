@@ -66,14 +66,23 @@ def test_advance_first_correct_jumps_to_three_days():
     assert due == scheduler.add_days(3)
 
 
-def test_advance_first_wrong_is_one_day():
+def test_advance_first_wrong_stays_one_day():
     stage, due, out = scheduler.advance(0, False)
     assert stage == 1 and due == scheduler.add_days(1)
 
 
-def test_advance_wrong_after_correct_resets():
+def test_advance_wrong_steps_down_and_halves():
+    # 15 天档答错 → 退到 7 天档，且在 7 天上打五折 ≈ 4 天
     stage, due, _ = scheduler.advance(4, False)
-    assert stage == 1 and due == scheduler.add_days(1)
+    assert stage == 3
+    assert due == scheduler.add_days(4)
+
+
+def test_advance_wrong_at_top_keeps_progress():
+    # 30 天档答错不会归零，只退到 15 天档的一半
+    stage, due, _ = scheduler.advance(5, False)
+    assert stage == 4
+    assert due == scheduler.add_days(8)
 
 
 def test_advance_last_stage_correct_leaves_pool():

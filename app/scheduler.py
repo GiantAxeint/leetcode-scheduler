@@ -19,19 +19,21 @@ def add_days(n: int, base: str | None = None) -> str:
     return (d + timedelta(days=n)).isoformat()
 
 
-def advance(stage: int, correct: bool) -> tuple[int, str | None, bool]:
+def advance(stage: int, correct: bool, lapse: float = 0.5) -> tuple[int, str | None, bool]:
     """返回 (新档位, 下次日期, 是否出池)。
 
-    答对：0 → 2（首答答对直接跳进 3 天那档），否则升一档；
-          到第 5 档再答对就出池。
-    答错：一律回到第 1 档（1 天后再来）。
+    答对：0 → 2（首答答对直接进 3 天档），否则升一档；第 5 档再答对就出池。
+    答错：退一档（最低 1 档），下一次间隔在该档基数上乘 lapse（默认打五折）。
     """
-    if not correct:
-        return 1, add_days(INTERVALS[0]), False
-    if stage >= len(INTERVALS):
-        return len(INTERVALS), None, True
-    new_stage = 2 if stage == 0 else stage + 1
-    return new_stage, add_days(INTERVALS[new_stage - 1]), False
+    if correct:
+        if stage >= len(INTERVALS):
+            return len(INTERVALS), None, True
+        new_stage = 2 if stage == 0 else stage + 1
+        return new_stage, add_days(INTERVALS[new_stage - 1]), False
+
+    new_stage = max(1, stage - 1)
+    days = max(1, round(INTERVALS[new_stage - 1] * lapse))
+    return new_stage, add_days(days), False
 
 
 _PROB_SELECT = """

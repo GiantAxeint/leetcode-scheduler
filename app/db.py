@@ -14,11 +14,10 @@ DEFAULT_SETTINGS = {
     "inbox_limit": "999",         # 待归纳区不设上限，保留字段做兼容
     "daily_minutes": "90",        # 每日时长上限（分钟）
     "interval_days": "1,3,7,15,30",
+    "lapse_factor": "0.5",        # 答错时下次间隔打几折
     "morning_new": "2",
     "noon_due": "2",
     "evening_due": "1",
-    "pass_threshold": "0.8",      # 检验通过率阈值
-    "hold_limit": "2",            # 连续几次持平整降一档
     "oral_mode": "1",             # 晚班口述模式开关
     "total_easy": "1094",         # 题库总数（用于进度环，可改）
     "total_medium": "2334",

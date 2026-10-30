@@ -144,7 +144,8 @@ def create_app(root: Path | None = None) -> Flask:
 
         correct = bool(b.get("correct"))
         stage_from = p["stage"] or 0
-        stage_to, next_due, out_pool = scheduler.advance(stage_from, correct)
+        lapse = db.get_float(c, "lapse_factor", 0.5)
+        stage_to, next_due, out_pool = scheduler.advance(stage_from, correct, lapse)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         c.execute(
