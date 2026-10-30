@@ -7,7 +7,7 @@
   1. 环境变量 SCJ_DATA_ROOT
   2. 程序目录旁 data_root.txt（单行绝对路径）
   3. %APPDATA%/刷题调度/data_root.txt（程序目录只读时的备选）
-  4. 内置默认 D:\\MyNote\\SelfNote\\算法题目
+  4. 默认 ~/Documents/刷题调度
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pathlib import Path
 
 APP_NAME = "刷题调度"
 POINTER_NAME = "data_root.txt"
-DEFAULT_ROOT = Path(r"D:\MyNote\SelfNote\算法题目")
+DEFAULT_ROOT = Path.home() / "Documents" / APP_NAME
 
 DB_NAME = "刷题调度.db"
 BACKUP_DIR = "backup"

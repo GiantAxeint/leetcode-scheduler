@@ -2,7 +2,12 @@
 __pycache__/
 *.pyc
 build/
+build_x*/
 dist/
+dist_x*/
 data/
 *.spec
 .pytest_cache/
+data_root.txt
+*.db
+backup/
