@@ -104,7 +104,7 @@ function problemItem(r) {
     <div class="m">${r.leetcode_id ? 'LeetCode ' + r.leetcode_id : '未绑定题号'}</div>
     <div class="row" style="margin-top:8px">
       <button class="btn" onclick="event.stopPropagation();donePlan(${r.plan_id})">标记完成</button>
-      <button class="btn ghost" onclick="event.stopPropagation();openCardEditor(null,${r.problem_id})">去建卡</button>
+      <button class="btn ghost" onclick="event.stopPropagation();openCardEditor(null,${r.problem_id})">去建题型</button>
     </div>
   </div>`;
 }
@@ -252,11 +252,11 @@ async function loadCards() {
     </tr>`).join('');
   $('#view-cards').innerHTML = `
     <div class="row" style="margin-bottom:14px">
-      <button class="btn primary" onclick="openCardEditor(null)">新建题型卡</button>
+      <button class="btn primary" onclick="openCardEditor(null)">新建题型</button>
       <span class="muted">共 ${cards.length} 张</span>
     </div>
     <div class="panel"><table>
-      <thead><tr><th>卡名</th><th>分类</th><th>档位</th><th>下次到期</th><th>挂题数</th><th></th></tr></thead>
+      <thead><tr><th>题型</th><th>分类</th><th>档位</th><th>下次到期</th><th>挂题数</th><th></th></tr></thead>
       <tbody>${rows || '<tr><td colspan="6" class="muted">还没有卡</td></tr>'}</tbody>
     </table></div>`;
 }
@@ -265,8 +265,8 @@ async function openCardEditor(id, attachProblem) {
   const d = id ? await api('/cards/' + id) : { card: {}, problems: [] };
   const c = d.card || {};
   modal(`
-    <h2 style="margin:0 0 16px;font-size:17px;font-weight:500">${id ? '编辑题型卡' : '新建题型卡'}</h2>
-    <label class="field"><span>卡名</span><input id="f-title" value="${esc(c.title || '')}" placeholder="如：滑动窗口 · 最短覆盖"></label>
+    <h2 style="margin:0 0 16px;font-size:17px;font-weight:500">${id ? '编辑题型' : '新建题型'}</h2>
+    <label class="field"><span>题型名</span><input id="f-title" value="${esc(c.title || '')}" placeholder="如：滑动窗口 · 最短覆盖"></label>
     <label class="field"><span>触发信号（最重要：题干出现什么就该想到它）</span>
       <textarea id="f-trigger" placeholder="连续子数组 + 求最短/最长 + 有单调性">${esc(c.trigger_signals || '')}</textarea></label>
     <label class="field"><span>一句话本质</span><input id="f-essence" value="${esc(c.essence || '')}" placeholder="用窗口吃掉不满足的部分"></label>
@@ -298,7 +298,7 @@ async function saveCard(id, attachProblem) {
     complexity: $('#f-complexity').value,
     category: $('#f-category').value,
   };
-  if (!body.title.trim()) { toast('卡名不能为空'); return; }
+  if (!body.title.trim()) { toast('题型名不能为空'); return; }
   if (id) {
     await api('/cards/' + id, { method: 'PUT', body });
   } else {

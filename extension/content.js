@@ -107,11 +107,11 @@
         </div>
         <div class="scj-actions">
           <button class="scj-btn primary scj-take">录用</button>
-          <button class="scj-btn scj-new">新建卡</button>
+          <button class="scj-btn scj-new">新建题型</button>
         </div>
         <div class="scj-newbox" hidden>
-          <input class="scj-newtitle" placeholder="新卡名，如：区间 DP">
-          <button class="scj-btn scj-save-new">建卡并录用</button>
+          <input class="scj-newtitle" placeholder="题型名，如：区间 DP">
+          <button class="scj-btn scj-save-new">建题型并录用</button>
         </div>
         <div class="scj-hint"></div>
       </div>`;
@@ -217,7 +217,7 @@
       });
       root.querySelector('.scj-save-new').addEventListener('click', () => {
         const name = root.querySelector('.scj-newtitle').value.trim();
-        if (!name) { hint('给卡起个名'); return; }
+        if (!name) { hint('给题型起个名'); return; }
         submit({ new_card_title: name });
       });
     }
