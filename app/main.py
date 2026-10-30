@@ -2,22 +2,42 @@
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import sys
 import threading
+import urllib.request
 import webbrowser
 
 from .api import create_app
 
+APP_MARK = "刷题调度"
+PORT_START, PORT_END = 8765, 8785
 
-def free_port(start: int = 8765, end: int = 8785) -> int:
-    for p in range(start, end + 1):
+
+def existing_instance() -> int | None:
+    """已经有一个实例在跑就复用它，别起第二个去抢同一个库。"""
+    for port in range(PORT_START, PORT_END + 1):
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/api/health", timeout=0.4
+            ) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            if data.get("app") == APP_MARK:
+                return port
+        except Exception:
+            continue
+    return None
+
+
+def free_port() -> int:
+    """注意：Windows 上不能带 SO_REUSEADDR，否则占用中的端口也能 bind 成功。"""
+    for port in range(PORT_START, PORT_END + 1):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
-                s.bind(("127.0.0.1", p))
-                return p
+                s.bind(("127.0.0.1", port))
+                return port
             except OSError:
                 continue
     raise RuntimeError("没有可用端口")
@@ -35,6 +55,17 @@ def _open(url: str) -> None:
 
 def main() -> int:
     silent = any(a in sys.argv[1:] for a in ("--silent", "-s"))
+
+    running = existing_instance()
+    if running:
+        url = f"http://127.0.0.1:{running}/"
+        print(f"已经有一个实例在跑：{url}")
+        if not silent:
+            threading.Timer(0.5, lambda: _open(url)).start()
+            threading.Timer(1.2, lambda: os._exit(0)).start()
+            threading.Event().wait(3)
+        return 0
+
     app = create_app()
     port = free_port()
     url = f"http://127.0.0.1:{port}/"

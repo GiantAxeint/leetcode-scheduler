@@ -86,9 +86,7 @@
     root.id = 'scj-root';
     root.innerHTML = `
       <div class="scj-head">
-        <span class="scj-dot" title="连接状态"></span>
         <span class="scj-brand">刷题调度</span>
-        <span class="scj-pending"></span>
         <button class="scj-fold" title="收起">–</button>
       </div>
       <div class="scj-body">
@@ -113,7 +111,7 @@
           <input class="scj-newtitle" placeholder="题型名，如：区间 DP">
           <button class="scj-btn scj-save-new">建题型并录用</button>
         </div>
-        <div class="scj-hint"></div>
+        <div class="scj-hint" hidden></div>
       </div>`;
     document.body.appendChild(root);
     return root;
@@ -127,23 +125,13 @@
     root.querySelector('.scj-title').textContent = info.title || '未识别标题';
     root.querySelector('.scj-meta').textContent =
       [info.difficulty, info.tags, info.solved ? '已通过' : ''].filter(Boolean).join(' · ') || '—';
-    const dot = root.querySelector('.scj-dot');
-    dot.classList.toggle('online', !!status.online);
-    root.querySelector('.scj-pending').textContent =
-      status.pending > 0 ? `${status.pending} 待写入` : (status.online ? '已连接' : '未连接');
   }
 
   async function refreshStatus() {
     const s = await send({ type: 'status' });
     status = { online: !!s.online, pending: s.pending || 0 };
-    paint();
     if (status.pending > 0 && status.online) {
-      const r = await send({ type: 'flush' });
-      if (r && r.flushed) {
-        status.pending = r.pending || 0;
-        paint();
-        hint(`补写成功 ${r.flushed} 条`);
-      }
+      await send({ type: 'flush' });
     }
   }
 
@@ -163,11 +151,12 @@
     } catch (e) { /* 离线，先不管 */ }
   }
 
-  function hint(msg) {
-    const h = root.querySelector('.scj-hint');
-    h.textContent = msg;
-    clearTimeout(h._t);
-    h._t = setTimeout(() => { h.textContent = ''; }, 6000);
+  function flash(msg, kind) {
+    const box = document.createElement('div');
+    box.className = 'scj-flash ' + (kind || '');
+    box.textContent = msg;
+    root.appendChild(box);
+    setTimeout(() => box.remove(), 2000);
   }
 
   async function submit(extra) {
@@ -183,16 +172,13 @@
       ...extra,
     };
     const res = await send({ type: 'api', path: '/capture', method: 'POST', body });
-    if (res.queued) {
-      status.online = false;
-      status.pending = res.pending || status.pending + 1;
-      paint();
-      hint('主程序没开，已存下，开起来会自动补写');
-    } else if (res.ok) {
-      hint('已录用');
+    if (res.ok) {
+      flash('录用成功', 'ok');
       refreshStatus();
+    } else if (res.offline) {
+      flash('已暂存，主程序启动后自动写入', 'warn');
     } else {
-      hint('写入失败');
+      flash('录用失败，' + (res.error || '未知原因'), 'err');
     }
   }
 
@@ -217,7 +203,7 @@
       });
       root.querySelector('.scj-save-new').addEventListener('click', () => {
         const name = root.querySelector('.scj-newtitle').value.trim();
-        if (!name) { hint('给题型起个名'); return; }
+        if (!name) { flash('给题型起个名', 'warn'); return; }
         submit({ new_card_title: name });
       });
     }

@@ -7,11 +7,11 @@ from pathlib import Path
 
 from . import config
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 DEFAULT_SETTINGS = {
-    "queue_limit": "30",          # 在途卡上限
-    "inbox_limit": "20",          # 待归卡区上限
+    "queue_limit": "15",          # 在途：当月要复习的不同题目上限（同一题多次复习算 1）
+    "inbox_limit": "999",         # 待归纳区不设上限，保留字段做兼容
     "daily_minutes": "90",        # 每日时长上限（分钟）
     "interval_days": "1,3,7,15,30",
     "morning_new": "2",
@@ -73,6 +73,12 @@ def migrate(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE problem ADD COLUMN solved INTEGER NOT NULL DEFAULT 0")
         if "solved_at" not in cols:
             conn.execute("ALTER TABLE problem ADD COLUMN solved_at TEXT")
+    if version < 3:
+        # 在途语义从「卡数」改成「不同题目数」，老库的 30 是旧口径，换成新默认 15
+        row = conn.execute("SELECT value FROM settings WHERE key='queue_limit'").fetchone()
+        if row and row["value"] == "30":
+            conn.execute("UPDATE settings SET value='15' WHERE key='queue_limit'")
+        conn.execute("UPDATE settings SET value='999' WHERE key='inbox_limit' AND value='20'")
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 

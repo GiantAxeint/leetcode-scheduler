@@ -13,15 +13,18 @@ let REVIEW = null;
 const SLOT_LABEL = { morning: '早班', noon: '午班', evening: '晚班' };
 
 async function api(path, opts = {}) {
+  const { silent, ...rest } = opts;
   const res = await fetch('/api' + path, {
     headers: { 'Content-Type': 'application/json' },
-    ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    ...rest,
+    body: rest.body ? JSON.stringify(rest.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    toast(data.error || `请求失败 ${res.status}`);
-    throw new Error(data.error || res.status);
+    if (!silent) toast(data.error || `请求失败 ${res.status}`);
+    const err = new Error(data.error || res.status);
+    err.code = data.code;
+    throw err;
   }
   return data;
 }
@@ -61,9 +64,69 @@ function startClock() {
 function renderGate(g, backlog) {
   const warn = (a, b) => (a >= b ? 'warn' : '');
   $('#gate').innerHTML = `
-    <span class="${warn(g.active, g.active_limit)}">在途 ${g.active}/${g.active_limit}</span>
-    <span class="${warn(g.inbox, g.inbox_limit)}">待归卡 ${g.inbox}/${g.inbox_limit}</span>
-    <span class="${backlog > 0 ? 'warn' : ''}">积压 ${backlog}</span>`;
+    <span class="chip ${warn(g.active, g.active_limit)}" onclick="openList('inflight')"
+          title="当月要复习的不同题目，同一题多次复习算 1">在途 ${g.active}/${g.active_limit}</span>
+    <span class="chip" onclick="openList('inbox')" title="还没归到题型上的题">待归纳 ${g.inbox}</span>
+    <span class="chip ${backlog > 0 ? 'warn' : ''}" onclick="openList('backlog')"
+          title="今天到期但没排进当日任务">积压 ${backlog}</span>`;
+}
+
+/* 点状态条看题目清单 */
+async function openList(kind) {
+  const meta = {
+    inflight: { title: '在途 · 当月要复习的题', url: '/inflight' },
+    inbox: { title: '待归纳题型区', url: '/problems?status=inbox' },
+    backlog: { title: '积压 · 今天没排下的', url: '/backlog' },
+  }[kind];
+  const rows = await api(meta.url);
+  const body = rows.length
+    ? rows.map((r) => {
+      const name = r.title || r.problem_title || '';
+      const sub = [
+        r.leetcode_id ? '#' + r.leetcode_id : '',
+        r.difficulty || '',
+        r.next_due ? '到期 ' + r.next_due : '',
+      ].filter(Boolean).join(' · ');
+      const pid = r.id || r.problem_id || null;
+      const cid = r.card_id || null;
+      return `<div class="recent-row">
+        <span><b style="font-weight:500">${esc(name)}</b><br><span class="muted">${esc(sub)}</span></span>
+        ${pid ? `<button class="btn ghost" onclick="removeProblem(${pid},'${kind}')">移除</button>`
+          : `<button class="btn ghost" onclick="removeCard(${cid},'${kind}')">移除</button>`}
+      </div>`;
+    }).join('')
+    : '<div class="muted" style="padding:14px 4px">空的</div>';
+
+  modal(`<h2 style="margin:0 0 14px;font-size:17px;font-weight:500">${meta.title}</h2>
+    ${body}
+    <div class="row end" style="margin-top:16px">
+      ${kind === 'inflight' ? '<button class="btn" onclick="gotoAdd()">添加题目</button>' : ''}
+      <button class="btn" onclick="closeModal()">关闭</button>
+    </div>`);
+}
+
+function gotoAdd() {
+  closeModal();
+  CURRENT_VIEW = 'problems';
+  location.hash = 'problems';
+  render();
+}
+
+async function removeProblem(pid, kind) {
+  if (!confirm('把这题从库里移除？关联的题型挂载也会断。')) return;
+  await api('/problems/' + pid, { method: 'DELETE' });
+  toast('已移除');
+  await refreshGate();
+  openList(kind);
+  if (CURRENT_VIEW === 'today') loadToday();
+}
+
+async function removeCard(cid, kind) {
+  if (!confirm('把这张卡归档？归档后不再进复习队列。')) return;
+  await api(`/cards/${cid}/archive`, { method: 'POST' });
+  toast('已归档');
+  await refreshGate();
+  openList(kind);
 }
 
 /* ---------------- 今日 ---------------- */
@@ -84,10 +147,18 @@ async function loadToday() {
     return `<div class="panel"><h3>${labels[slot]}</h3>
       <div class="cap">${caps[slot]}</div>${body}</div>`;
   }).join('');
-  $('#view-today').innerHTML = `<div class="cols">${blocks}</div>
+  const total = Object.values(TODAY.slots).flat().length;
+  $('#view-today').innerHTML = `
+    <div class="row" style="margin-bottom:12px">
+      <h2 style="margin:0;font-size:16px;font-weight:500">当日任务</h2>
+      <span class="muted">要复习的 + 今天新录的，全部在在途中</span>
+      <div class="spacer"></div>
+      <span class="muted">共 ${total} 项 · ${TODAY.date}</span>
+    </div>
+    <div class="cols">${blocks}</div>
     <div class="row" style="margin-top:16px">
       <button class="btn" onclick="loadToday()">刷新</button>
-      <span class="muted">共 ${Object.values(TODAY.slots).flat().length} 项 · ${TODAY.date}</span>
+      <button class="btn ghost" onclick="gotoAdd()">加题</button>
     </div>`;
 }
 
@@ -358,8 +429,8 @@ async function loadProblems() {
       <button class="btn primary" onclick="addProblem()">录入</button>
     </div>
     <div class="panel" style="margin-bottom:16px">
-      <h3>待归卡区 <span class="badge ${inbox.length ? 'due' : ''}">${inbox.length}</span></h3>
-      <div class="cap">这些题还没挂到任何题型卡上，多了会堵住入口</div>
+      <h3>待归纳题型区 <span class="badge ${inbox.length ? 'due' : ''}">${inbox.length}</span></h3>
+      <div class="cap">录了但还没归到题型上的题。不设上限，但堆着不归纳等于没学</div>
       <table><thead><tr><th>题号</th><th>标题</th><th>状态</th><th></th></tr></thead>
       <tbody>${inboxRows || '<tr><td colspan="4" class="muted">空的，很好</td></tr>'}</tbody></table>
     </div>
@@ -381,9 +452,15 @@ async function addProblem() {
     solved: $('#p-solved').checked,
   };
   if (!body.leetcode_id && !body.title) { toast('题号或标题至少给一个'); return; }
-  const r = await api('/problems', { method: 'POST', body });
-  toast(r.duplicate ? '这题已经在库里了' : (body.slot ? '已排进' + SLOT_LABEL[body.slot] : '已进待归卡区'));
+  try {
+    await api('/problems', { method: 'POST', body, silent: true });
+  } catch (e) {
+    toast(`录用失败，${e.message}`);
+    return;
+  }
+  toast(body.slot ? '录用成功，已排进' + SLOT_LABEL[body.slot] : '录用成功，已进待归纳区');
   loadProblems();
+  refreshGate();
   if (CURRENT_VIEW === 'today') loadToday();
 }
 
@@ -521,12 +598,11 @@ async function loadSettings() {
     <div class="panel" style="margin-bottom:16px">
       <h3>节奏</h3><div class="cap">改完立刻生效，不用重启</div>
       <div class="grid2">
-        <label class="field"><span>在途卡上限</span><input id="s-queue" type="number" value="${st.queue_limit}"></label>
-        <label class="field"><span>待归卡区上限</span><input id="s-inbox" type="number" value="${st.inbox_limit}"></label>
+        <label class="field"><span>在途题目上限（当月要复习的不同题目）</span><input id="s-queue" type="number" value="${st.queue_limit}"></label>
+        <label class="field"><span>每日时长上限（分钟）</span><input id="s-minutes" type="number" value="${st.daily_minutes}"></label>
         <label class="field"><span>早班新题数</span><input id="s-morning" type="number" value="${st.morning_new}"></label>
         <label class="field"><span>午班到期数</span><input id="s-noon" type="number" value="${st.noon_due}"></label>
         <label class="field"><span>晚班到期数</span><input id="s-evening" type="number" value="${st.evening_due}"></label>
-        <label class="field"><span>每日时长上限（分钟）</span><input id="s-minutes" type="number" value="${st.daily_minutes}"></label>
         <label class="field"><span>通过率阈值</span><input id="s-threshold" type="number" step="0.05" value="${st.pass_threshold}"></label>
         <label class="field"><span>连续持平几次降档</span><input id="s-hold" type="number" value="${st.hold_limit}"></label>
       </div>
@@ -565,7 +641,6 @@ async function loadSettings() {
 async function saveSettings() {
   const body = {
     queue_limit: $('#s-queue').value,
-    inbox_limit: $('#s-inbox').value,
     morning_new: $('#s-morning').value,
     noon_due: $('#s-noon').value,
     evening_due: $('#s-evening').value,

@@ -326,6 +326,25 @@ def create_app(root: Path | None = None) -> Flask:
         q += " ORDER BY id DESC LIMIT 300"
         return jsonify([dict(r) for r in c.execute(q, args)])
 
+    @app.get("/api/inflight")
+    def api_inflight():
+        """在途：当月还要复习的不同题目。"""
+        c = conn()
+        return jsonify([dict(r) for r in scheduler.inflight_problems(c)])
+
+    @app.get("/api/backlog")
+    def api_backlog():
+        """积压：今天到期但没排进今日计划的卡。"""
+        c = conn()
+        return jsonify([dict(r) for r in scheduler.backlog_cards(c)])
+
+    @app.delete("/api/problems/<int:pid>")
+    def api_problem_delete(pid: int):
+        c = conn()
+        c.execute("DELETE FROM problem WHERE id=?", (pid,))
+        c.commit()
+        return jsonify({"ok": True})
+
     @app.post("/api/problems")
     def api_problem_create():
         c = conn()
@@ -339,9 +358,12 @@ def create_app(root: Path | None = None) -> Flask:
         if lid:
             dup = c.execute("SELECT * FROM problem WHERE leetcode_id=?", (lid,)).fetchone()
             if dup:
-                _place_in_slot(c, dup["id"], b.get("slot"))
-                c.commit()
-                return jsonify({"id": dup["id"], "duplicate": True})
+                return jsonify({"error": "此题已录用", "code": "DUPLICATE"}), 409
+
+        g_ = scheduler.gate(c)
+        if not g_["can_add_problem"]:
+            return jsonify({"error": f"在途已满（{g_['active']}/{g_['active_limit']}）",
+                            "code": "GATE_FULL", "gate": g_}), 409
 
         url = b.get("url") or (f"https://leetcode.cn/problems/{b['slug']}/" if b.get("slug") else "")
         solved = 1 if b.get("solved") else 0
@@ -385,22 +407,24 @@ def create_app(root: Path | None = None) -> Flask:
         if lid:
             row = c.execute("SELECT * FROM problem WHERE leetcode_id=?", (lid,)).fetchone()
         if row:
-            pid = row["id"]
-            if b.get("solved"):
-                c.execute(
-                    "UPDATE problem SET solved=1, solved_at=COALESCE(solved_at,?) WHERE id=?",
-                    (scheduler.today_str(), pid),
-                )
-        else:
-            solved = 1 if b.get("solved") else 0
-            cur = c.execute(
-                "INSERT INTO problem(leetcode_id,slug,title,difficulty,url,tags,status,solved,solved_at) "
-                "VALUES(?,?,?,?,?,?,'inbox',?,?)",
-                (lid, b.get("slug", ""), title, b.get("difficulty", ""), b.get("url", ""),
-                 b.get("tags", ""), solved, scheduler.today_str() if solved else None),
-            )
-            pid = cur.lastrowid
-            created = True
+            # 同一题只录用一次，避免重复占在途名额
+            return jsonify({"error": "此题已录用", "code": "DUPLICATE",
+                            "problem_id": row["id"]}), 409
+
+        g_ = scheduler.gate(c)
+        if not g_["can_add_problem"]:
+            return jsonify({"error": f"在途已满（{g_['active']}/{g_['active_limit']}）",
+                            "code": "GATE_FULL", "gate": g_}), 409
+
+        solved = 1 if b.get("solved") else 0
+        cur = c.execute(
+            "INSERT INTO problem(leetcode_id,slug,title,difficulty,url,tags,status,solved,solved_at) "
+            "VALUES(?,?,?,?,?,?,'inbox',?,?)",
+            (lid, b.get("slug", ""), title, b.get("difficulty", ""), b.get("url", ""),
+             b.get("tags", ""), solved, scheduler.today_str() if solved else None),
+        )
+        pid = cur.lastrowid
+        created = True
 
         card_id = b.get("card_id")
         if not card_id and (b.get("new_card_title") or "").strip():

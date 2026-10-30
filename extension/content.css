@@ -19,25 +19,40 @@
 .scj-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 9px 12px;
+  padding: 2px 8px 2px 12px;
   border-bottom: 1px solid #e3e1da;
   background: #fbfbf9;
 }
 
-.scj-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: #d9d7cf; flex: none;
-}
-.scj-dot.online { background: #639922; }
-
 .scj-brand { font-weight: 500; font-size: 12.5px; }
-.scj-pending { margin-left: auto; font-size: 11px; color: #9a988f; }
 
 .scj-fold {
-  border: none; background: none; cursor: pointer;
-  font-size: 15px; line-height: 1; color: #9a988f; padding: 0 2px;
+  margin-left: auto;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 30px;
+  line-height: 1;
+  color: #9a988f;
+  padding: 0 4px 4px;
 }
+.scj-fold:hover { color: #2c2c2a; }
+
+.scj-flash {
+  position: absolute;
+  right: 0;
+  top: -44px;
+  background: #2c2c2a;
+  color: #fff;
+  font-size: 12.5px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(20, 20, 18, .18);
+}
+.scj-flash.ok { background: #3b6d11; }
+.scj-flash.err { background: #a32d2d; }
+.scj-flash.warn { background: #854f0b; }
 
 .scj-body { padding: 12px; }
 

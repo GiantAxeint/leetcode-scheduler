@@ -28,13 +28,32 @@ def due_cards(conn: sqlite3.Connection, today: str | None = None) -> list[sqlite
     ).fetchall()
 
 
+_INFLIGHT_SQL = """
+    SELECT p.id, p.leetcode_id, p.title, p.difficulty, p.tags, p.status,
+           MIN(s.next_due) AS next_due, MAX(s.stage) AS stage
+    FROM problem p
+    LEFT JOIN card_problem cp ON cp.problem_id = p.id
+    LEFT JOIN pattern_card c  ON c.id = cp.card_id AND c.status = 'active'
+    LEFT JOIN card_state  s   ON s.card_id = c.id
+    WHERE p.status = 'inbox'
+       OR EXISTS (SELECT 1 FROM card_problem cp2
+                  JOIN pattern_card c2 ON c2.id = cp2.card_id
+                  WHERE cp2.problem_id = p.id AND c2.status = 'active')
+    GROUP BY p.id
+"""
+
+
+def inflight_problems(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """在途 = 当月还要复习的不同题目（同一题复习多少次都算 1 题）。"""
+    return conn.execute(
+        _INFLIGHT_SQL + " ORDER BY (next_due IS NULL), next_due ASC, p.id DESC"
+    ).fetchall()
+
+
 def gate(conn: sqlite3.Connection) -> dict:
-    """两道闸门的状态。"""
-    limit = db.get_int(conn, "queue_limit", 30)
-    inbox_limit = db.get_int(conn, "inbox_limit", 20)
-    active = conn.execute(
-        "SELECT COUNT(*) c FROM pattern_card WHERE status='active'"
-    ).fetchone()["c"]
+    """容量闸门：按「不同题目数」算，不按复习次数算。"""
+    limit = db.get_int(conn, "queue_limit", 15)
+    active = conn.execute(f"SELECT COUNT(*) c FROM ({_INFLIGHT_SQL})").fetchone()["c"]
     inbox = conn.execute(
         "SELECT COUNT(*) c FROM problem WHERE status='inbox'"
     ).fetchone()["c"]
@@ -42,9 +61,9 @@ def gate(conn: sqlite3.Connection) -> dict:
         "active": active,
         "active_limit": limit,
         "inbox": inbox,
-        "inbox_limit": inbox_limit,
-        "can_add_card": active < limit,
-        "can_add_problem": inbox < inbox_limit,
+        "can_add": active < limit,
+        "can_add_card": True,       # 题型卡本身不再设上限
+        "can_add_problem": active < limit,
     }
 
 
@@ -66,9 +85,9 @@ def build_plan(conn: sqlite3.Connection, today: str | None = None) -> None:
     used_cards: set[int] = set()
     rows: list[tuple] = []
 
-    # 早班：先排待归卡区的题；闸门关了就改成复习到期卡
+    # 早班：先排待归纳区的题；在途满了就改成复习到期卡
     placed_new = 0
-    if g["can_add_card"]:
+    if g["can_add_problem"]:
         news = conn.execute(
             "SELECT id FROM problem WHERE status='inbox' ORDER BY created_at ASC LIMIT ?",
             (n_new,),
@@ -94,12 +113,24 @@ def build_plan(conn: sqlite3.Connection, today: str | None = None) -> None:
     conn.commit()
 
 
-def backlog(conn: sqlite3.Connection, today: str | None = None) -> int:
-    """今天排不下、被迫顺延的到期卡数量。"""
+def backlog_cards(conn: sqlite3.Connection, today: str | None = None) -> list[sqlite3.Row]:
+    """今天到期、但没排进今日计划的卡（积压）。"""
     today = today or today_str()
-    total = len(due_cards(conn, today))
-    planned = conn.execute(
-        "SELECT COUNT(*) c FROM daily_plan WHERE plan_date=? AND card_id IS NOT NULL",
-        (today,),
-    ).fetchone()["c"]
-    return max(0, total - planned)
+    return conn.execute(
+        """
+        SELECT c.id AS card_id, c.title, c.category, s.next_due, s.stage
+        FROM card_state s
+        JOIN pattern_card c ON c.id = s.card_id
+        WHERE c.status = 'active' AND s.next_due <= ?
+          AND c.id NOT IN (
+              SELECT card_id FROM daily_plan
+              WHERE plan_date = ? AND card_id IS NOT NULL
+          )
+        ORDER BY s.next_due ASC
+        """,
+        (today, today),
+    ).fetchall()
+
+
+def backlog(conn: sqlite3.Connection, today: str | None = None) -> int:
+    return len(backlog_cards(conn, today))

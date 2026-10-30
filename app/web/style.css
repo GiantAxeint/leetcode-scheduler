@@ -43,6 +43,9 @@ body {
 .gate { display: flex; gap: 8px; font-size: 12px; color: var(--sub); flex: 1; }
 .gate span { background: #f4f2ec; padding: 2px 10px; border-radius: 20px; }
 .gate span.warn { background: var(--red-bg); color: var(--red); }
+.gate .chip { cursor: pointer; user-select: none; }
+.gate .chip:hover { background: #e8e6df; }
+.gate .chip.warn:hover { background: #f7d9d9; }
 
 .tabs { display: flex; gap: 4px; }
 

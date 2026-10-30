@@ -64,16 +64,18 @@ async function enqueue(job) {
 
 async function send(job) {
   const port = await findPort();
-  if (!port) return false;
+  if (!port) return { ok: false, offline: true };
   try {
     const res = await fetch(`http://127.0.0.1:${port}/api${job.path}`, {
       method: job.method || 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: job.body ? JSON.stringify(job.body) : undefined,
     });
-    return res.ok;
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    return { ok: res.ok, status: res.status, data };
   } catch (e) {
-    return false;
+    return { ok: false, offline: true };
   }
 }
 
@@ -88,8 +90,10 @@ async function flush() {
   const rest = [];
   let flushed = 0;
   for (const job of q) {
-    if (await send(job)) flushed += 1;
-    else rest.push(job);
+    const r = await send(job);
+    if (r.ok) flushed += 1;
+    else if (r.offline) rest.push(job);
+    // 服务端明确拒绝（409 之类）的不再重试，直接丢弃
   }
   await setQueue(rest);
   return { flushed, pending: rest.length };
@@ -98,17 +102,24 @@ async function flush() {
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   (async () => {
     if (msg.type === 'api') {
-      const job = { path: msg.path, method: msg.method || 'POST', body: msg.body };
-      const ok = await send(job);
-      if (!ok) {
-        if ((job.method || 'POST').toUpperCase() !== 'GET') {
-          await enqueue(job);
-        }
-        const q = await getQueue();
-        reply({ ok: false, queued: (job.method || 'POST').toUpperCase() !== 'GET', pending: q.length });
-      } else {
-        reply({ ok: true, queued: false, pending: (await getQueue()).length });
+      const method = (msg.method || 'POST').toUpperCase();
+      const job = { path: msg.path, method, body: msg.body };
+      const r = await send(job);
+      if (r.ok) {
+        reply({ ok: true, data: r.data, pending: (await getQueue()).length });
+        return;
       }
+      if (r.offline) {
+        if (method !== 'GET') await enqueue(job);
+        reply({ ok: false, offline: true, pending: (await getQueue()).length });
+        return;
+      }
+      reply({
+        ok: false,
+        offline: false,
+        status: r.status,
+        error: (r.data && r.data.error) || `服务异常 ${r.status || ''}`.trim(),
+      });
       return;
     }
     if (msg.type === 'status') {

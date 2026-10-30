@@ -44,10 +44,39 @@ def test_due_card_appears_in_plan(conn):
     assert cid in [r["card_id"] for r in rows]
 
 
-def test_gate_blocks_when_queue_full(conn):
+def _link(c, cid, title="Two Sum"):
+    pid = c.execute(
+        "INSERT INTO problem(title,status) VALUES(?, 'linked')", (title,)
+    ).lastrowid
+    c.execute("INSERT INTO card_problem(card_id,problem_id) VALUES(?,?)", (cid, pid))
+    c.commit()
+    return pid
+
+
+def test_gate_counts_distinct_problems(conn):
+    cid = _add_card(conn)
+    _link(conn, cid)
     db.set_setting(conn, "queue_limit", 1)
-    _add_card(conn)
-    assert scheduler.gate(conn)["can_add_card"] is False
+    g = scheduler.gate(conn)
+    assert g["active"] == 1
+    assert g["can_add_problem"] is False
+
+
+def test_same_problem_on_two_cards_counts_once(conn):
+    a = _add_card(conn, "卡A")
+    b = _add_card(conn, "卡B")
+    pid = _link(conn, a)
+    conn.execute("INSERT INTO card_problem(card_id,problem_id) VALUES(?,?)", (b, pid))
+    conn.commit()
+    assert scheduler.gate(conn)["active"] == 1
+
+
+def test_gate_ignores_archived_cards(conn):
+    cid = _add_card(conn)
+    _link(conn, cid)
+    conn.execute("UPDATE pattern_card SET status='archived' WHERE id=?", (cid,))
+    conn.commit()
+    assert scheduler.gate(conn)["active"] == 0
 
 
 def test_full_queue_stops_new_problems(conn):
