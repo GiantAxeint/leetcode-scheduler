@@ -244,14 +244,14 @@ async function loadToday() {
   renderGate(TODAY.gate, TODAY.backlog);
   const labels = { morning: '早班', noon: '午班', evening: '晚班' };
   const caps = {
-    morning: '新题优先，闸门关了就改复习',
-    noon: '到期卡，闭卷重做核心步骤',
+    morning: '今天新录的题，先自己做',
+    noon: '到期的题，闭卷重做核心步骤',
     evening: '只口述，不写码',
   };
   const blocks = ['morning', 'noon', 'evening'].map((slot) => {
     const items = TODAY.slots[slot] || [];
     const body = items.length
-      ? items.map((r) => (r.card_id ? cardItem(r) : problemItem(r))).join('')
+      ? items.map(planItem).join('')
       : `<div class="muted" style="padding:12px 0">今天这班空的</div>`;
     return `<div class="panel"><h3>${labels[slot]}</h3>
       <div class="cap">${caps[slot]}</div>${body}</div>`;
@@ -260,7 +260,7 @@ async function loadToday() {
   $('#view-today').innerHTML = `
     <div class="row" style="margin-bottom:12px">
       <h2 style="margin:0;font-size:16px;font-weight:500">当日任务</h2>
-      <span class="muted">要复习的 + 今天新录的，全部在在途中</span>
+      <span class="muted">要复习的 + 今天新录的</span>
       <div class="spacer"></div>
       <span class="muted">共 ${total} 项 · ${TODAY.date}</span>
     </div>
@@ -271,149 +271,126 @@ async function loadToday() {
     </div>`;
 }
 
-function cardItem(r) {
-  return `<div class="item ${r.done ? 'done' : ''}" onclick="openReview(${r.card_id})">
-    <div class="t">${esc(r.title)}<span class="badge due">S${r.stage}</span></div>
-    <div class="m">${esc(r.category || '未分类')} · 到期 ${esc(r.next_due || '')}</div>
-  </div>`;
-}
-
-function problemItem(r) {
+function planItem(r) {
+  const stage = r.stage || 0;
+  const badge = stage ? `S${stage} · ${STAGE_LABEL[stage]}` : '新题';
   return `<div class="item ${r.done ? 'done' : ''}">
-    <div class="t">${titleLink(r.problem_title, {
-      url: r.problem_url, slug: r.problem_slug, leetcode_id: r.leetcode_id,
-      difficulty: r.problem_difficulty,
-    })}<span class="badge new">新题</span></div>
-    <div class="m">${r.leetcode_id ? 'LeetCode ' + r.leetcode_id : '未绑定题号'}</div>
+    <div class="t">${titleLink(r.title, r)}<span class="badge ${stage ? 'due' : 'new'}">${badge}</span></div>
+    <div class="m">${r.leetcode_id ? 'LeetCode ' + r.leetcode_id : '未绑定题号'}${
+      r.cards ? ' · ' + esc(r.cards) : ' · 未归题型'}</div>
     <div class="row" style="margin-top:8px">
-      <button class="btn" onclick="event.stopPropagation();donePlan(${r.plan_id})">标记完成</button>
-      <button class="btn ghost" onclick="event.stopPropagation();openCardEditor(null,${r.problem_id})">去建题型</button>
+      <button class="btn primary" onclick="quickReview(${r.problem_id},true)">答对</button>
+      <button class="btn danger" onclick="quickReview(${r.problem_id},false)">未答对</button>
+      <button class="btn ghost" onclick="openReview(${r.problem_id})">细想</button>
+      ${r.status === 'inbox'
+        ? `<button class="btn ghost" onclick="openCardEditor(null,${r.problem_id})">归题型</button>` : ''}
     </div>
   </div>`;
 }
 
-async function donePlan(id) {
-  await api(`/plan/${id}/done`, { method: 'POST' });
+/* ---------------- 复习（按题判，题型卡只提供参考） ---------------- */
+const STAGE_LABEL = ['新题', '1 天后', '3 天后', '7 天后', '15 天后', '30 天后'];
+
+async function quickReview(pid, correct) {
+  try {
+    await api('/review', { method: 'POST', body: { problem_id: pid, correct }, silent: true });
+  } catch (e) {
+    toast(e.message);
+    return;
+  }
+  toast(correct ? '答对，下次推后' : '未答对，明天再来');
   loadToday();
+  refreshGate();
 }
 
-/* ---------------- 复习三阶段 ---------------- */
-async function openReview(cardId) {
-  const d = await api('/cards/' + cardId);
-  REVIEW = { card: d.card, step: 1, t0: Date.now(), checks: {} };
+async function openReview(pid) {
+  const d = await api('/problems/' + pid);
+  REVIEW = { problem: d.problem, cards: d.cards || [], step: 1, t0: Date.now() };
   drawReview();
 }
 
 function drawReview() {
-  const c = REVIEW.card;
+  const p = REVIEW.problem;
+  const cards = REVIEW.cards;
   const dots = Array.from({ length: 5 }, (_, i) =>
-    `<div class="dot ${i < (c.stage || 1) ? 'on' : ''}"></div>`).join('');
+    `<div class="dot ${i < (p.stage || 0) ? 'on' : ''}"></div>`).join('');
 
   if (REVIEW.step === 1) {
     modal(`
-      <div class="muted">阶段一 · 只给你线索</div>
-      <h2 style="margin:6px 0 12px;font-size:17px;font-weight:500">${esc(c.title)}</h2>
+      <div class="muted">阶段一 · 先自己想</div>
+      <h2 style="margin:6px 0 12px;font-size:17px;font-weight:500">${esc(p.title)}</h2>
       <div class="stage-dots">${dots}</div>
       <div class="panel" style="background:#fbfaf6;margin:16px 0">
-        <div class="cap" style="margin:0 0 6px">触发信号</div>
-        <div style="white-space:pre-wrap">${esc(c.trigger_signals || '（还没填触发信号）')}</div>
+        <div class="cap" style="margin:0 0 6px">这题属于</div>
+        <div>${cards.length
+          ? cards.map((c) => `<b style="font-weight:500">${esc(c.title)}</b>
+              <div class="muted" style="margin:2px 0 8px">${esc(c.trigger_signals || '（还没写触发信号）')}</div>`).join('')
+          : '<span class="muted">还没归到任何题型</span>'}</div>
       </div>
-      <div class="muted" style="margin-bottom:16px">先在纸上或脑子里走一遍，别急着点。</div>
+      <div class="muted" style="margin-bottom:16px">在脑子里把解法走一遍，再展开对答案。</div>
       <div class="row end">
-        <button class="btn danger" onclick="failFast()">想不起来</button>
         <button class="btn" onclick="skipReview()">跳过</button>
-        <button class="btn primary" onclick="REVIEW.step=2;drawReview()">想起来了 · 展开</button>
+        <button class="btn primary" onclick="REVIEW.step=2;drawReview()">想好了 · 展开</button>
       </div>`);
     return;
   }
 
   if (REVIEW.step === 2) {
+    const ref = cards.length
+      ? cards.map((c) => `
+        <div class="cap" style="margin-top:12px">${esc(c.title)} · 骨架</div>
+        <pre class="code">${esc(c.skeleton_code || '（空）')}</pre>
+        <div class="cap" style="margin-top:12px">边界与坑</div>
+        <div style="white-space:pre-wrap">${esc(c.pitfalls || '（空）')}</div>`).join('')
+      : '<div class="muted" style="padding:12px 0">这题还没归题型，没有参考骨架。对完答案记得去归一下。</div>';
     modal(`
       <div class="muted">阶段二 · 对答案</div>
-      <h2 style="margin:6px 0 12px;font-size:17px;font-weight:500">${esc(c.title)}</h2>
-      <div class="cap">骨架</div>
-      <pre class="code">${esc(c.skeleton_code || '（空）')}</pre>
-      <div class="cap" style="margin-top:12px">边界与坑</div>
-      <div style="white-space:pre-wrap">${esc(c.pitfalls || '（空）')}</div>
-      ${c.complexity ? `<div class="cap" style="margin-top:12px">复杂度</div><div>${esc(c.complexity)}</div>` : ''}
+      <h2 style="margin:6px 0 12px;font-size:17px;font-weight:500">${esc(p.title)}</h2>
+      ${ref}
       <div class="row end" style="margin-top:20px">
         <button class="btn" onclick="REVIEW.step=1;drawReview()">返回</button>
-        <button class="btn primary" onclick="REVIEW.step=3;drawReview()">进入判定</button>
+        <button class="btn primary" onclick="REVIEW.step=3;drawReview()">判定</button>
       </div>`);
     return;
   }
 
-  const checks = (TODAY?.checks || []).map((it) => `
-    <label class="checkline" id="chk-${it.id}">
-      <input type="checkbox" onchange="toggleCheck(${it.id}, this.checked)">
-      <span><b style="font-weight:500">${esc(it.name)}</b><br>
-      <span class="muted">${esc(it.hint)}</span></span>
-    </label>`).join('');
-
   modal(`
     <div class="muted">阶段三 · 判定</div>
-    <h2 style="margin:6px 0 12px;font-size:17px;font-weight:500">${esc(c.title)}</h2>
-    <div class="cap">这轮你做到了哪几项</div>
-    ${checks}
-    <div class="grid2" style="margin-top:16px">
-      <label class="field"><span>错在哪（挂了必选）</span>
-        <select id="errtype">
-          <option value="">—</option>
-          <option value="knowledge">不会 · 知识缺口</option>
-          <option value="index">会但想不到 · 索引缺口</option>
-          <option value="execution">想到了写错 · 执行缺口</option>
-        </select>
-      </label>
-      <label class="field"><span>一句话备注</span>
-        <input id="note" placeholder="可空">
-      </label>
+    <h2 style="margin:6px 0 14px;font-size:17px;font-weight:500">${esc(p.title)}</h2>
+    <div class="muted" style="margin-bottom:14px">
+      现在是第 ${p.stage || 0} 档。答对 → ${p.stage ? '升一档' : '直接跳到 3 天后'}；未答对 → 回到 1 天后。
     </div>
+    <label class="field"><span>备注（可空）</span><input id="note" placeholder="卡在哪一步"></label>
     <div class="row end">
       <button class="btn" onclick="closeModal()">取消</button>
-      <button class="btn primary" onclick="submitReview()">提交</button>
+      <button class="btn danger" onclick="submitReview(false)">未答对</button>
+      <button class="btn primary" onclick="submitReview(true)">答对</button>
     </div>`);
 }
 
-function toggleCheck(id, ok) {
-  REVIEW.checks[id] = ok;
-  $(`#chk-${id}`).classList.toggle('on', ok);
-}
-
-async function submitReview() {
-  const checks = Object.entries(REVIEW.checks).map(([id, ok]) => ({ id: Number(id), ok }));
-  const err = $('#errtype')?.value || null;
+async function submitReview(correct) {
   const note = $('#note')?.value || '';
-  if (checks.length && checks.every((c) => !c.ok) && !err) {
-    toast('全挂了的话，选一下错在哪');
-    return;
-  }
   const res = await api('/review', {
     method: 'POST',
     body: {
-      card_id: REVIEW.card.id,
-      checks,
-      error_type: err,
+      problem_id: REVIEW.problem.id,
+      correct,
       note,
       duration_sec: Math.round((Date.now() - REVIEW.t0) / 1000),
     },
   });
   closeModal();
-  const label = { pass: '过 · 升档', hold: '持平 · 原地', fail: '挂 · 退档' }[res.result] || res.result;
-  toast(`${label} → ${res.archived ? '已归档出池' : '下次 ' + res.next_due}`);
+  if (res.out_pool) toast('答对，走完 5 档，出池了');
+  else toast(correct ? `答对 → 下次 ${res.next_due}` : `未答对 → 明天再来`);
   loadToday();
+  refreshGate();
 }
 
 async function skipReview() {
-  await api('/review', { method: 'POST', body: { card_id: REVIEW.card.id, skip: true } });
+  await api('/review', { method: 'POST', body: { problem_id: REVIEW.problem.id, skip: true } });
   closeModal();
   toast('已跳过，不计入档位');
   loadToday();
-}
-
-function failFast() {
-  REVIEW.step = 3;
-  drawReview();
-  toast('已记为挂，勾一下你现在还剩哪几项会');
 }
 
 /* ---------------- 题型卡 ---------------- */
@@ -423,24 +400,26 @@ async function loadCards() {
     <tr>
       <td><a href="#" onclick="event.preventDefault();openCardEditor(${c.id})">${esc(c.title)}</a></td>
       <td>${esc(c.category || '')}</td>
-      <td>${c.status === 'archived' ? '已归档' : 'S' + c.stage}</td>
-      <td>${esc(c.next_due || '')}</td>
+      <td>${c.status === 'archived' ? '已收起' : '使用中'}</td>
       <td>${c.problem_count || 0}</td>
       <td class="row">
         <button class="btn ghost" onclick="openCardEditor(${c.id})">编辑</button>
         ${c.status === 'archived'
           ? `<button class="btn ghost" onclick="reopenCard(${c.id})">回炉</button>`
-          : `<button class="btn ghost" onclick="archiveCard(${c.id})">归档</button>`}
+          : `<button class="btn ghost" onclick="archiveCard(${c.id})">收起</button>`}
       </td>
     </tr>`).join('');
   $('#view-cards').innerHTML = `
-    <div class="row" style="margin-bottom:14px">
+    <div class="row" style="margin-bottom:6px">
       <button class="btn primary" onclick="openCardEditor(null)">新建题型</button>
       <span class="muted">共 ${cards.length} 张</span>
     </div>
+    <div class="cap" style="margin-bottom:14px">
+      题型是归纳用的容器：写清触发信号和骨架，复习时作为参考答案。它不排期，排期的是题。
+    </div>
     <div class="panel"><table>
-      <thead><tr><th>题型</th><th>分类</th><th>档位</th><th>下次到期</th><th>挂题数</th><th></th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="6" class="muted">还没有卡</td></tr>'}</tbody>
+      <thead><tr><th>题型</th><th>分类</th><th>状态</th><th>挂题数</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5" class="muted">还没有题型</td></tr>'}</tbody>
     </table></div>`;
 }
 
@@ -643,20 +622,47 @@ function buildHeat(cal) {
   return `<div class="heat">${cells.join('')}</div>`;
 }
 
+let STATS_YEAR = new Date().getFullYear();
+
+function buildHeat(cal, year) {
+  const end = new Date(year, 11, 31);
+  const first = new Date(year, 0, 1);
+  first.setDate(first.getDate() - first.getDay());   // 对齐到周日
+  const cells = [];
+  const d = new Date(first);
+  while (d <= end) {
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const inYear = d.getFullYear() === year;
+    const n = inYear ? (cal[key] || 0) : 0;
+    const lv = !inYear ? 'blank' : n === 0 ? '' : n <= 2 ? 'l1' : n <= 4 ? 'l2' : 'l3';
+    cells.push(`<i class="${lv}" title="${inYear ? key + '　' + n + ' 次' : ''}"></i>`);
+    d.setDate(d.getDate() + 1);
+  }
+  return `<div class="heat">${cells.join('')}</div>`;
+}
+
 async function loadStats() {
-  const s = await api('/stats');
+  const s = await api('/stats?year=' + STATS_YEAR);
   if (s.gate) renderGate(s.gate, s.backlog || 0);
+
   const p = s.progress_total;
   const diffRows = s.progress.map((x, i) => `
     <div class="diff-row ${['easy', 'medium', 'hard'][i]}">
       <span class="nm">${x.name}</span><span class="val">${x.solved}/${x.total}</span>
     </div>`).join('');
+
   const cs = s.calendar_stats;
   const recent = s.recent_pass.length
     ? s.recent_pass.map((r) => `
-      <div class="recent-row"><span>${esc(r.title)}</span>
-      <span class="when">${relTime(r.reviewed_at)}</span></div>`).join('')
-    : '<div class="muted" style="padding:14px 4px">还没有通过记录</div>';
+      <div class="recent-row">
+        <span>${titleLink(r.title, { difficulty: r.difficulty, leetcode_id: null })}
+        <span class="muted">${r.stage_to ? 'S' + r.stage_to : ''}</span></span>
+        <span class="when">${relTime(r.reviewed_at)}</span>
+      </div>`).join('')
+    : '<div class="muted" style="padding:14px 4px">这年还没有答对记录</div>';
+
+  const yearOpts = (s.years || []).map((y) =>
+    `<option value="${y}" ${y === cs.year ? 'selected' : ''}>${y} 年</option>`).join('');
 
   const maxDay = Math.max(1, ...s.daily.map((d) => d.n));
   const days = s.daily.map((d) => `
@@ -668,7 +674,7 @@ async function loadStats() {
   const errs = s.errors.map((e) => `<tr><td>${esc(e.t)}</td><td>${e.n}</td></tr>`).join('');
   const stages = s.by_stage.map((b) => {
     const rate = b.n ? Math.round((b.p / b.n) * 100) : 0;
-    return `<tr><td>S${b.stage}</td><td>${b.n}</td><td>${rate}%</td></tr>`;
+    return `<tr><td>${b.stage ? 'S' + b.stage : '新题'}</td><td>${b.n}</td><td>${rate}%</td></tr>`;
   }).join('');
 
   $('#view-stats').innerHTML = `
@@ -679,7 +685,7 @@ async function loadStats() {
           <div class="donut-center">
             <div class="big">${p.solved}<small>/${p.total}</small></div>
             <div class="tag">✓ 已解答</div>
-            <div class="sub">在途 ${s.active} · 归档 ${s.archived}</div>
+            <div class="sub">在途 ${s.active} · 出池 ${s.done}</div>
           </div>
         </div>
       </div>
@@ -688,24 +694,25 @@ async function loadStats() {
 
     <div class="panel" style="margin-bottom:16px">
       <div class="row">
-        <h3 style="margin:0">过去一年共复习 ${cs.total} 次</h3>
+        <h3 style="margin:0">${cs.year} 年共完成 ${cs.total} 次</h3>
         <div class="spacer"></div>
-        <span class="muted">累计 ${cs.active_days} 天 · 连续 ${cs.streak} 天</span>
+        <span class="muted">累计 ${cs.active_days} 天${cs.year === new Date().getFullYear() ? ` · 连续 ${cs.streak} 天` : ''}</span>
+        <select style="width:auto" onchange="STATS_YEAR=Number(this.value);loadStats()">${yearOpts}</select>
       </div>
-      ${buildHeat(s.calendar)}
-      <div class="muted">颜色越深，当天复习次数越多；悬停看具体日期</div>
+      ${buildHeat(s.calendar, cs.year)}
+      <div class="muted">颜色越深，当天完成次数越多；悬停看具体日期</div>
     </div>
 
     <div class="panel" style="margin-bottom:16px">
-      <h3>最近通过</h3><div class="cap">阅卷过了的卡，最近的在前</div>
+      <h3>最近答对</h3><div class="cap">判定为答对的题，最近的在前</div>
       ${recent}
     </div>
 
     <div class="cols">
-      <div class="panel"><h3>最近 14 天</h3><div class="cap">每天复习了几次</div>${days || '<div class="muted">还没数据</div>'}</div>
-      <div class="panel"><h3>各档通过率</h3><div class="cap">哪一档最容易挂</div>
-        <table><thead><tr><th>档</th><th>次数</th><th>通过率</th></tr></thead><tbody>${stages || '<tr><td colspan="3" class="muted">—</td></tr>'}</tbody></table></div>
-      <div class="panel"><h3>挂的时候错在哪</h3><div class="cap">不会 / 想不到 / 写错</div>
+      <div class="panel"><h3>最近 14 天</h3><div class="cap">每天完成了几次</div>${days || '<div class="muted">还没数据</div>'}</div>
+      <div class="panel"><h3>各档通过率</h3><div class="cap">哪一档最容易答错</div>
+        <table><thead><tr><th>档</th><th>次数</th><th>答对率</th></tr></thead><tbody>${stages || '<tr><td colspan="3" class="muted">—</td></tr>'}</tbody></table></div>
+      <div class="panel"><h3>答错的时候</h3><div class="cap">不会 / 想不到 / 写错</div>
         <table><thead><tr><th>类型</th><th>次数</th></tr></thead><tbody>${errs || '<tr><td colspan="2" class="muted">—</td></tr>'}</tbody></table></div>
     </div>`;
 }

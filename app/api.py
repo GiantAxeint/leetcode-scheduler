@@ -6,7 +6,7 @@ import json
 import shutil
 import sqlite3
 import threading
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from flask import Flask, g, jsonify, request, send_from_directory
@@ -97,17 +97,16 @@ def create_app(root: Path | None = None) -> Flask:
         scheduler.build_plan(c, today)
         rows = c.execute(
             """
-            SELECT p.id AS plan_id, p.slot, p.done, p.card_id, p.problem_id,
-                   c.title, c.category, c.trigger_signals,
-                   s.stage, s.next_due,
-                   pr.title AS problem_title, pr.leetcode_id, pr.url AS problem_url,
-                   pr.slug AS problem_slug, pr.difficulty AS problem_difficulty
-            FROM daily_plan p
-            LEFT JOIN pattern_card c ON c.id = p.card_id
-            LEFT JOIN card_state  s ON s.card_id = p.card_id
-            LEFT JOIN problem    pr ON pr.id = p.problem_id
-            WHERE p.plan_date = ?
-            ORDER BY CASE p.slot WHEN 'morning' THEN 0 WHEN 'noon' THEN 1 ELSE 2 END, p.id
+            SELECT d.id AS plan_id, d.slot, d.done, d.problem_id,
+                   p.title, p.leetcode_id, p.url, p.slug, p.difficulty,
+                   p.stage, p.next_due, p.status,
+                   (SELECT GROUP_CONCAT(cc.title, '、') FROM card_problem cp
+                    JOIN pattern_card cc ON cc.id = cp.card_id
+                    WHERE cp.problem_id = p.id) AS cards
+            FROM daily_plan d
+            JOIN problem p ON p.id = d.problem_id
+            WHERE d.plan_date = ?
+            ORDER BY CASE d.slot WHEN 'morning' THEN 0 WHEN 'noon' THEN 1 ELSE 2 END, d.id
             """,
             (today,),
         ).fetchall()
@@ -125,86 +124,65 @@ def create_app(root: Path | None = None) -> Flask:
             }
         )
 
-    # ---------- 复习 ----------
+    # ---------- 复习（判的是题，不是卡） ----------
     @app.post("/api/review")
     def api_review():
         c = conn()
-        body = request.get_json(force=True) or {}
-        card_id = int(body["card_id"])
-        today = date.today()
+        b = request.get_json(force=True) or {}
+        pid = int(b.get("problem_id") or 0)
+        if not pid:
+            return jsonify({"error": "缺 problem_id"}), 400
+        p = c.execute("SELECT * FROM problem WHERE id=?", (pid,)).fetchone()
+        if not p:
+            return jsonify({"error": "题目不存在"}), 404
 
-        st = c.execute("SELECT * FROM card_state WHERE card_id=?", (card_id,)).fetchone()
-        if not st:
-            return jsonify({"error": "卡片无状态记录"}), 404
+        if b.get("skip"):
+            _log(c, pid, None, "skip", p["stage"], p["stage"], 0, 0, [], None, 0, "")
+            _mark_plan_done(c, pid)
+            c.commit()
+            return jsonify({"result": "skip", "stage": p["stage"], "next_due": p["next_due"]})
 
-        if body.get("skip"):
-            _log(c, card_id, state.SKIP, st["stage"], st["stage"], 0, 0, [], None, 0, "")
-            _mark_done(c, card_id)
-            return jsonify({"result": "skip", "stage": st["stage"], "next_due": st["next_due"]})
-
-        checks = body.get("checks", [])
-        passed = sum(1 for x in checks if x.get("ok"))
-        total = len(checks)
-        threshold = db.get_float(c, "pass_threshold", 0.8)
-        hold_limit = db.get_int(c, "hold_limit", 2)
-        ivs = db.intervals(c)
-
-        out = state.transition(
-            stage=st["stage"],
-            hold_count=st["hold_count"],
-            fail_count=st["fail_count"],
-            passed=passed,
-            total=total,
-            threshold=threshold,
-            hold_limit=hold_limit,
-            intervals=ivs,
-            today=today,
-        )
+        correct = bool(b.get("correct"))
+        stage_from = p["stage"] or 0
+        stage_to, next_due, out_pool = scheduler.advance(stage_from, correct)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         c.execute(
-            """UPDATE card_state
-               SET stage=?, next_due=?, pass_streak=?, hold_count=?, fail_count=?, archived_at=?
-               WHERE card_id=?""",
+            """UPDATE problem
+               SET stage=?, next_due=?, last_reviewed_at=?,
+                   pass_streak=?, fail_count=?, phase=?, solved=?, solved_at=?
+               WHERE id=?""",
             (
-                out.stage_to,
-                out.next_due,
-                (st["pass_streak"] + 1) if out.result == state.PASS else 0,
-                out.hold_count,
-                out.fail_count,
-                today.isoformat() if out.archived else None,
-                card_id,
+                stage_to,
+                next_due,
+                now,
+                (p["pass_streak"] or 0) + 1 if correct else 0,
+                (p["fail_count"] or 0) + (0 if correct else 1),
+                "done" if out_pool else p["phase"],
+                1 if (correct or p["solved"]) else 0,
+                (now[:10] if correct else p["solved_at"]),
+                pid,
             ),
         )
-        if out.archived:
-            c.execute("UPDATE pattern_card SET status='archived' WHERE id=?", (card_id,))
-            c.execute(
-                "UPDATE problem SET phase='done' WHERE id IN "
-                "(SELECT problem_id FROM card_problem WHERE card_id=?)",
-                (card_id,),
-            )
-            scheduler.refill(c)
-        if out.result == state.PASS:
-            # 这张卡挂了哪些题，就认为那些题已经做出来了
-            c.execute(
-                "UPDATE problem SET solved=1, solved_at=COALESCE(solved_at,?) "
-                "WHERE id IN (SELECT problem_id FROM card_problem WHERE card_id=?)",
-                (today.isoformat(), card_id),
-            )
-
         _log(
-            c, card_id, out.result, out.stage_from, out.stage_to, passed, total,
-            checks, body.get("error_type"), int(body.get("duration_sec") or 0), body.get("note", ""),
+            c, pid, None,
+            "correct" if correct else "wrong",
+            stage_from, stage_to,
+            int(b.get("passed") or 0), int(b.get("total") or 0),
+            b.get("checks") or [], b.get("error_type"),
+            int(b.get("duration_sec") or 0), b.get("note", ""),
         )
-        _mark_done(c, card_id)
+        _mark_plan_done(c, pid)
         c.commit()
+        if out_pool:
+            scheduler.refill(c)
         return jsonify(
             {
-                "result": out.result,
-                "stage_from": out.stage_from,
-                "stage_to": out.stage_to,
-                "next_due": out.next_due,
-                "archived": out.archived,
-                "ratio": round(passed / total, 2) if total else 0,
+                "result": "correct" if correct else "wrong",
+                "stage_from": stage_from,
+                "stage_to": stage_to,
+                "next_due": next_due,
+                "out_pool": out_pool,
             }
         )
 
@@ -322,17 +300,12 @@ def create_app(root: Path | None = None) -> Flask:
     @app.post("/api/cards/<int:cid>/archive")
     def api_card_archive(cid: int):
         c = conn()
+        # 题型卡只是归纳容器，归档它不影响题的复习排期
         c.execute("UPDATE pattern_card SET status='archived' WHERE id=?", (cid,))
         c.execute(
             "UPDATE card_state SET archived_at=? WHERE card_id=?", (scheduler.today_str(), cid)
         )
-        c.execute(
-            "UPDATE problem SET phase='done' WHERE id IN "
-            "(SELECT problem_id FROM card_problem WHERE card_id=?)",
-            (cid,),
-        )
         c.commit()
-        scheduler.refill(c)
         return jsonify({"ok": True})
 
     @app.post("/api/cards/<int:cid>/reopen")
@@ -366,6 +339,27 @@ def create_app(root: Path | None = None) -> Flask:
         q += " ORDER BY id DESC LIMIT 300"
         return jsonify([dict(r) for r in c.execute(q, args)])
 
+    @app.get("/api/problems/<int:pid>")
+    def api_problem_detail(pid: int):
+        """复习页要用的：题本身 + 它归属的题型（骨架、坑这些）。"""
+        c = conn()
+        p = c.execute("SELECT * FROM problem WHERE id=?", (pid,)).fetchone()
+        if not p:
+            return jsonify({"error": "题目不存在"}), 404
+        cards = c.execute(
+            "SELECT c.* FROM pattern_card c JOIN card_problem cp ON cp.card_id=c.id "
+            "WHERE cp.problem_id=? ORDER BY c.status ASC",
+            (pid,),
+        ).fetchall()
+        logs = c.execute(
+            "SELECT reviewed_at, result, stage_from, stage_to, note FROM review_log "
+            "WHERE problem_id=? ORDER BY reviewed_at DESC LIMIT 20",
+            (pid,),
+        ).fetchall()
+        return jsonify({"problem": dict(p),
+                        "cards": [dict(x) for x in cards],
+                        "logs": [dict(x) for x in logs]})
+
     @app.get("/api/inflight")
     def api_inflight():
         """在途：当月还要复习的不同题目。"""
@@ -376,7 +370,7 @@ def create_app(root: Path | None = None) -> Flask:
     def api_backlog():
         """积压：今天到期但没排进今日计划的卡。"""
         c = conn()
-        return jsonify([dict(r) for r in scheduler.backlog_cards(c)])
+        return jsonify([dict(r) for r in scheduler.backlog_problems(c)])
 
     @app.get("/api/queued")
     def api_queued():
@@ -622,6 +616,8 @@ def create_app(root: Path | None = None) -> Flask:
     def api_stats():
         c = conn()
         one = lambda q, a=(): c.execute(q, a).fetchone()[0]
+        this_year = date.today().year
+        year = int(request.args.get("year") or this_year)
 
         # ---- 解题进度（本地口径）----
         diff_rows = c.execute(
@@ -641,36 +637,46 @@ def create_app(root: Path | None = None) -> Flask:
             solved_all += s
             total_all += tot
 
-        # ---- 日历（过去一年每天复习次数）----
+        # ---- 该自然年每天完成次数（答对答错都算）----
         cal_rows = c.execute(
             "SELECT substr(reviewed_at,1,10) d, COUNT(*) n FROM review_log "
-            "WHERE reviewed_at >= date('now','localtime','-365 day') GROUP BY d"
+            "WHERE substr(reviewed_at,1,4)=? GROUP BY d",
+            (str(year),),
         ).fetchall()
         calendar = {r["d"]: r["n"] for r in cal_rows}
 
-        streak, cursor = 0, date.today()
-        if cursor.isoformat() not in calendar:
-            cursor -= timedelta(days=1)
-        while cursor.isoformat() in calendar:
-            streak += 1
-            cursor -= timedelta(days=1)
+        streak = 0
+        if year == this_year:
+            cur = date.today()
+            if cur.isoformat() not in calendar:
+                cur -= timedelta(days=1)
+            while cur.isoformat() in calendar:
+                streak += 1
+                cur -= timedelta(days=1)
+
+        years = [int(r["y"]) for r in c.execute(
+            "SELECT DISTINCT substr(reviewed_at,1,4) y FROM review_log "
+            "WHERE reviewed_at IS NOT NULL ORDER BY y DESC")]
+        if this_year not in years:
+            years.insert(0, this_year)
 
         recent = c.execute(
-            "SELECT r.reviewed_at, r.card_id, k.title FROM review_log r "
-            "JOIN pattern_card k ON k.id=r.card_id WHERE r.result='pass' "
+            "SELECT r.reviewed_at, r.problem_id, p.title, p.difficulty FROM review_log r "
+            "JOIN problem p ON p.id = r.problem_id WHERE r.result='correct' "
             "ORDER BY r.reviewed_at DESC LIMIT 12"
         ).fetchall()
 
         by_stage = [
             dict(r) for r in c.execute(
-                "SELECT stage_from AS stage, COUNT(*) n, SUM(result='pass') p "
-                "FROM review_log WHERE stage_from IS NOT NULL GROUP BY stage_from"
+                "SELECT stage_from AS stage, COUNT(*) n, SUM(result='correct') p "
+                "FROM review_log WHERE result IN ('correct','wrong') "
+                "AND stage_from IS NOT NULL GROUP BY stage_from"
             )
         ]
         errors = [
             dict(r) for r in c.execute(
                 "SELECT COALESCE(error_type,'未标注') t, COUNT(*) n FROM review_log "
-                "WHERE result IN ('fail','hold') GROUP BY t ORDER BY n DESC"
+                "WHERE result='wrong' GROUP BY t ORDER BY n DESC"
             )
         ]
         daily = [
@@ -680,21 +686,25 @@ def create_app(root: Path | None = None) -> Flask:
             )
         ]
         return jsonify({
-            "active": one("SELECT COUNT(*) FROM pattern_card WHERE status='active'"),
-            "archived": one("SELECT COUNT(*) FROM pattern_card WHERE status='archived'"),
-            "inbox": one("SELECT COUNT(*) FROM problem WHERE status='inbox'"),
-            "due_today": len(scheduler.due_cards(c)),
-            "reviews": one("SELECT COUNT(*) FROM review_log"),
+            "active": one("SELECT COUNT(*) FROM problem WHERE phase='active'"),
+            "done": one("SELECT COUNT(*) FROM problem WHERE phase='done'"),
+            "queued": one("SELECT COUNT(*) FROM problem WHERE phase='queued'"),
+            "cards": one("SELECT COUNT(*) FROM pattern_card WHERE status='active'"),
+            "inbox": one("SELECT COUNT(*) FROM problem WHERE status='inbox' AND phase<>'done'"),
+            "due_today": len(scheduler.due_problems(c)),
+            "reviews": one("SELECT COUNT(*) FROM review_log WHERE result<>'skip'"),
             "gate": scheduler.gate(c),
             "backlog": scheduler.backlog(c),
             "progress": progress,
             "progress_total": {"solved": solved_all, "total": total_all},
             "calendar": calendar,
             "calendar_stats": {
+                "year": year,
                 "total": sum(calendar.values()),
                 "active_days": len(calendar),
                 "streak": streak,
             },
+            "years": years,
             "recent_pass": [dict(r) for r in recent],
             "by_stage": by_stage,
             "errors": errors,
@@ -760,18 +770,19 @@ def _settings_payload(c: sqlite3.Connection) -> dict:
     return out
 
 
-def _log(c, card_id, result, sfrom, sto, passed, total, checks, error_type, dur, note):
+def _log(c, problem_id, card_id, result, sfrom, sto, passed, total,
+         checks, error_type, dur, note):
     c.execute(
-        """INSERT INTO review_log(card_id,result,stage_from,stage_to,passed,total,
-                                  checks_json,error_type,duration_sec,note)
-           VALUES(?,?,?,?,?,?,?,?,?,?)""",
-        (card_id, result, sfrom, sto, passed, total,
+        """INSERT INTO review_log(problem_id,card_id,result,stage_from,stage_to,
+                                  passed,total,checks_json,error_type,duration_sec,note)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        (problem_id, card_id, result, sfrom, sto, passed, total,
          json.dumps(checks, ensure_ascii=False), error_type, dur, note),
     )
 
 
-def _mark_done(c: sqlite3.Connection, card_id: int) -> None:
+def _mark_plan_done(c: sqlite3.Connection, problem_id: int) -> None:
     c.execute(
-        "UPDATE daily_plan SET done=1 WHERE plan_date=? AND card_id=?",
-        (scheduler.today_str(), card_id),
+        "UPDATE daily_plan SET done=1 WHERE plan_date=? AND problem_id=?",
+        (scheduler.today_str(), problem_id),
     )

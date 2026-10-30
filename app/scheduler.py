@@ -1,85 +1,83 @@
-"""调度：谁到期、闸门开不开、今天排哪几道。"""
+"""调度：以「题」为单位排期，题型卡只做归纳，不参与调度。"""
 
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 
 from . import db
 
-# 题目的三个进度态：
-#   queued 候补——录进来了但没轮到，不参与排班
-#   active 在途——正在复习循环里，每天可能被排到
-#   done   完成——题型复习满 5 档归档，退出循环
+INTERVALS = [1, 3, 7, 15, 30]   # stage 1..5 对应的天数
 
 
 def today_str() -> str:
     return date.today().isoformat()
 
 
-def due_cards(conn: sqlite3.Connection, today: str | None = None) -> list[sqlite3.Row]:
-    """到期且未归档的卡。
+def add_days(n: int, base: str | None = None) -> str:
+    d = date.fromisoformat(base) if base else date.today()
+    return (d + timedelta(days=n)).isoformat()
 
-    一张卡挂的题如果全在候补，这张卡不该被排进来 —— 所以要求
-    「卡没挂题」或「卡上至少有一道在途题」。
+
+def advance(stage: int, correct: bool) -> tuple[int, str | None, bool]:
+    """返回 (新档位, 下次日期, 是否出池)。
+
+    答对：0 → 2（首答答对直接跳进 3 天那档），否则升一档；
+          到第 5 档再答对就出池。
+    答错：一律回到第 1 档（1 天后再来）。
     """
+    if not correct:
+        return 1, add_days(INTERVALS[0]), False
+    if stage >= len(INTERVALS):
+        return len(INTERVALS), None, True
+    new_stage = 2 if stage == 0 else stage + 1
+    return new_stage, add_days(INTERVALS[new_stage - 1]), False
+
+
+_PROB_SELECT = """
+    SELECT p.*,
+           (SELECT GROUP_CONCAT(c.title, '、') FROM card_problem cp
+            JOIN pattern_card c ON c.id = cp.card_id
+            WHERE cp.problem_id = p.id) AS cards
+    FROM problem p
+"""
+
+
+def due_problems(conn: sqlite3.Connection, today: str | None = None) -> list[sqlite3.Row]:
     today = today or today_str()
     return conn.execute(
-        """
-        SELECT c.id, c.title, c.category, c.status,
-               s.stage, s.next_due, s.pass_streak, s.hold_count, s.fail_count
-        FROM card_state s
-        JOIN pattern_card c ON c.id = s.card_id
-        WHERE c.status = 'active' AND s.next_due <= ?
-          AND (
-                NOT EXISTS (SELECT 1 FROM card_problem cp WHERE cp.card_id = c.id)
-             OR EXISTS (SELECT 1 FROM card_problem cp
-                        JOIN problem p ON p.id = cp.problem_id
-                        WHERE cp.card_id = c.id AND p.phase = 'active')
-          )
-        ORDER BY s.next_due ASC, s.stage ASC
-        """,
+        _PROB_SELECT
+        + """ WHERE p.phase='active' AND p.next_due IS NOT NULL AND p.next_due <= ?
+              ORDER BY p.next_due ASC, p.id ASC""",
         (today,),
     ).fetchall()
 
 
-_INFLIGHT_SQL = """
-    SELECT p.id, p.leetcode_id, p.title, p.difficulty, p.tags, p.status, p.url, p.slug,
-           p.phase, p.order_no,
-           MIN(s.next_due) AS next_due, MAX(s.stage) AS stage
-    FROM problem p
-    LEFT JOIN card_problem cp ON cp.problem_id = p.id
-    LEFT JOIN pattern_card c  ON c.id = cp.card_id AND c.status = 'active'
-    LEFT JOIN card_state  s   ON s.card_id = c.id
-    WHERE p.phase = 'active'
-    GROUP BY p.id
-"""
+def fresh_problems(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """还没复习过的新题。"""
+    return conn.execute(
+        _PROB_SELECT
+        + """ WHERE p.phase='active' AND p.stage=0
+              ORDER BY COALESCE(p.order_no, 999999), p.id ASC"""
+    ).fetchall()
 
 
 def inflight_problems(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
-        _INFLIGHT_SQL + " ORDER BY (next_due IS NULL), next_due ASC, p.id DESC"
+        _PROB_SELECT + " WHERE p.phase='active' "
+        "ORDER BY (p.next_due IS NULL), p.next_due ASC, p.id DESC"
     ).fetchall()
 
 
 def queued_problems(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """候补队列，按手动顺序，没排过序的按录入先后。"""
     return conn.execute(
-        """
-        SELECT p.id, p.leetcode_id, p.title, p.difficulty, p.tags, p.status, p.url, p.slug,
-               p.phase, p.order_no, p.created_at,
-               (SELECT GROUP_CONCAT(c.title, '、') FROM card_problem cp
-                JOIN pattern_card c ON c.id = cp.card_id
-                WHERE cp.problem_id = p.id) AS cards
-        FROM problem p
-        WHERE p.phase = 'queued'
-        ORDER BY COALESCE(p.order_no, 999999), p.id
-        """
+        _PROB_SELECT
+        + """ WHERE p.phase='queued'
+              ORDER BY COALESCE(p.order_no, 999999), p.id"""
     ).fetchall()
 
 
 def queue_order(conn: sqlite3.Connection, ids: list[int]) -> None:
-    """按传入顺序重写候补队列序号。"""
     for i, pid in enumerate(ids):
         conn.execute(
             "UPDATE problem SET order_no=? WHERE id=? AND phase='queued'", (i, pid)
@@ -88,7 +86,6 @@ def queue_order(conn: sqlite3.Connection, ids: list[int]) -> None:
 
 
 def refill(conn: sqlite3.Connection) -> int:
-    """在途空出几个名额，就从候补队头补几个。"""
     limit = db.get_int(conn, "queue_limit", 15)
     active = conn.execute(
         "SELECT COUNT(*) c FROM problem WHERE phase='active'"
@@ -102,14 +99,16 @@ def refill(conn: sqlite3.Connection) -> int:
         (need,),
     ).fetchall()
     for r in rows:
-        conn.execute("UPDATE problem SET phase='active' WHERE id=?", (r["id"],))
+        conn.execute(
+            "UPDATE problem SET phase='active', next_due=? WHERE id=?",
+            (today_str(), r["id"]),
+        )
     if rows:
         conn.commit()
     return len(rows)
 
 
 def gate(conn: sqlite3.Connection) -> dict:
-    """在途 / 候补 / 待归纳 / 积压 四个数。"""
     limit = db.get_int(conn, "queue_limit", 15)
     active = conn.execute(
         "SELECT COUNT(*) c FROM problem WHERE phase='active'"
@@ -118,7 +117,7 @@ def gate(conn: sqlite3.Connection) -> dict:
         "SELECT COUNT(*) c FROM problem WHERE phase='queued'"
     ).fetchone()["c"]
     inbox = conn.execute(
-        "SELECT COUNT(*) c FROM problem WHERE status='inbox'"
+        "SELECT COUNT(*) c FROM problem WHERE status='inbox' AND phase<>'done'"
     ).fetchone()["c"]
     return {
         "active": active,
@@ -127,46 +126,39 @@ def gate(conn: sqlite3.Connection) -> dict:
         "inbox": inbox,
         "can_add": active < limit,
         "can_add_card": True,
-        "can_add_problem": True,     # 满了就进候补，不再拒收
+        "can_add_problem": True,
     }
 
 
 def build_plan(conn: sqlite3.Connection, today: str | None = None) -> None:
-    """当天计划只生成一次；已有就跳过。"""
+    """当天计划只生成一次。早班新题、午班到期、晚班剩余到期。"""
     today = today or today_str()
-    exists = conn.execute(
+    if conn.execute(
         "SELECT 1 FROM daily_plan WHERE plan_date=? LIMIT 1", (today,)
-    ).fetchone()
-    if exists:
+    ).fetchone():
         return
 
     n_new = db.get_int(conn, "morning_new", 2)
     n_noon = db.get_int(conn, "noon_due", 2)
     n_even = db.get_int(conn, "evening_due", 1)
 
-    due = list(due_cards(conn, today))
-    used_cards: set[int] = set()
     rows: list[tuple] = []
+    used: set[int] = set()
 
-    # 早班先排「在途 + 还没归题型」的题，没有就补到期卡
-    placed_new = 0
-    news = conn.execute(
-        "SELECT id FROM problem WHERE phase='active' AND status='inbox' "
-        "ORDER BY COALESCE(order_no, 999999), id LIMIT ?",
-        (n_new,),
-    ).fetchall()
-    for r in news:
+    fresh = fresh_problems(conn)[:n_new]
+    for r in fresh:
         rows.append((today, "morning", None, r["id"]))
-        placed_new += 1
+        used.add(r["id"])
 
-    for slot, need in (("morning", n_new - placed_new), ("noon", n_noon), ("evening", n_even)):
-        for row in due:
+    due = [r for r in due_problems(conn, today) if r["id"] not in used]
+    for slot, need in (("morning", n_new - len(fresh)), ("noon", n_noon), ("evening", n_even)):
+        for r in due:
             if need <= 0:
                 break
-            if row["id"] in used_cards:
+            if r["id"] in used:
                 continue
-            rows.append((today, slot, row["id"], None))
-            used_cards.add(row["id"])
+            rows.append((today, slot, None, r["id"]))
+            used.add(r["id"])
             need -= 1
 
     conn.executemany(
@@ -176,24 +168,18 @@ def build_plan(conn: sqlite3.Connection, today: str | None = None) -> None:
     conn.commit()
 
 
-def backlog_cards(conn: sqlite3.Connection, today: str | None = None) -> list[sqlite3.Row]:
-    """今天到期、但没排进今日计划的卡（积压）。"""
+def backlog_problems(conn: sqlite3.Connection, today: str | None = None) -> list[sqlite3.Row]:
+    """今天到期但没排进今日计划的题。"""
     today = today or today_str()
     return conn.execute(
-        """
-        SELECT c.id AS card_id, c.title, c.category, s.next_due, s.stage
-        FROM card_state s
-        JOIN pattern_card c ON c.id = s.card_id
-        WHERE c.status = 'active' AND s.next_due <= ?
-          AND c.id NOT IN (
-              SELECT card_id FROM daily_plan
-              WHERE plan_date = ? AND card_id IS NOT NULL
-          )
-        ORDER BY s.next_due ASC
-        """,
+        _PROB_SELECT
+        + """ WHERE p.phase='active' AND p.next_due IS NOT NULL AND p.next_due <= ?
+              AND p.id NOT IN (SELECT problem_id FROM daily_plan
+                               WHERE plan_date=? AND problem_id IS NOT NULL)
+              ORDER BY p.next_due ASC""",
         (today, today),
     ).fetchall()
 
 
 def backlog(conn: sqlite3.Connection, today: str | None = None) -> int:
-    return len(backlog_cards(conn, today))
+    return len(backlog_problems(conn, today))

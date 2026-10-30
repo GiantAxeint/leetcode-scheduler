@@ -37,11 +37,48 @@ def test_plan_generated_once(conn):
     assert n1 == n2
 
 
-def test_due_card_appears_in_plan(conn):
-    cid = _add_card(conn)
+def _add_problem(c, title, stage=0, next_due=None, phase="active"):
+    return c.execute(
+        "INSERT INTO problem(title,phase,stage,next_due) VALUES(?,?,?,?)",
+        (title, phase, stage, next_due),
+    ).lastrowid
+
+
+def test_due_problem_appears_in_plan(conn):
+    pid = _add_problem(conn, "题A", stage=3, next_due=scheduler.today_str())
     scheduler.build_plan(conn)
-    rows = conn.execute("SELECT card_id FROM daily_plan WHERE card_id IS NOT NULL").fetchall()
-    assert cid in [r["card_id"] for r in rows]
+    rows = conn.execute("SELECT problem_id FROM daily_plan").fetchall()
+    assert pid in [r["problem_id"] for r in rows]
+
+
+def test_fresh_problem_goes_to_morning(conn):
+    pid = _add_problem(conn, "新题", stage=0, next_due=None)
+    scheduler.build_plan(conn)
+    row = conn.execute(
+        "SELECT slot FROM daily_plan WHERE problem_id=?", (pid,)
+    ).fetchone()
+    assert row["slot"] == "morning"
+
+
+def test_advance_first_correct_jumps_to_three_days():
+    stage, due, out = scheduler.advance(0, True)
+    assert stage == 2 and out is False
+    assert due == scheduler.add_days(3)
+
+
+def test_advance_first_wrong_is_one_day():
+    stage, due, out = scheduler.advance(0, False)
+    assert stage == 1 and due == scheduler.add_days(1)
+
+
+def test_advance_wrong_after_correct_resets():
+    stage, due, _ = scheduler.advance(4, False)
+    assert stage == 1 and due == scheduler.add_days(1)
+
+
+def test_advance_last_stage_correct_leaves_pool():
+    stage, due, out = scheduler.advance(5, True)
+    assert out is True and due is None
 
 
 def _link(c, cid, title="Two Sum", phase="active"):
@@ -111,7 +148,7 @@ def test_full_queue_stops_new_problems(conn):
 
 def test_backlog_counts_unplanned_due(conn):
     for i in range(5):
-        _add_card(conn, f"card{i}")
+        _add_problem(conn, f"p{i}", stage=2, next_due=scheduler.today_str())
     db.set_setting(conn, "noon_due", 1)
     db.set_setting(conn, "evening_due", 1)
     db.set_setting(conn, "morning_new", 0)

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import config
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 DEFAULT_SETTINGS = {
     "queue_limit": "15",          # 在途：当月要复习的不同题目上限（同一题多次复习算 1）
@@ -96,6 +96,74 @@ def migrate(conn: sqlite3.Connection) -> None:
                 "UPDATE problem SET phase=? WHERE id=?",
                 ("active" if i < limit else "queued", pid),
             )
+    if version < 5:
+        # 调度单位从「题型卡」改成「题」：题自己带 stage / next_due
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(problem)")}
+        for name, ddl in (
+            ("stage", "ALTER TABLE problem ADD COLUMN stage INTEGER NOT NULL DEFAULT 0"),
+            ("next_due", "ALTER TABLE problem ADD COLUMN next_due TEXT"),
+            ("last_reviewed_at", "ALTER TABLE problem ADD COLUMN last_reviewed_at TEXT"),
+            ("pass_streak", "ALTER TABLE problem ADD COLUMN pass_streak INTEGER NOT NULL DEFAULT 0"),
+            ("fail_count", "ALTER TABLE problem ADD COLUMN fail_count INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if name not in cols:
+                conn.execute(ddl)
+
+        # review_log 允许挂在题上（card_id 可空）
+        rcols = {r["name"] for r in conn.execute("PRAGMA table_info(review_log)")}
+        if "problem_id" not in rcols:
+            conn.executescript(
+                """
+                CREATE TABLE review_log_v5 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    problem_id INTEGER REFERENCES problem(id) ON DELETE CASCADE,
+                    card_id INTEGER REFERENCES pattern_card(id) ON DELETE CASCADE,
+                    reviewed_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+                    result TEXT NOT NULL,
+                    stage_from INTEGER,
+                    stage_to INTEGER,
+                    passed INTEGER NOT NULL DEFAULT 0,
+                    total INTEGER NOT NULL DEFAULT 0,
+                    checks_json TEXT NOT NULL DEFAULT '[]',
+                    error_type TEXT,
+                    duration_sec INTEGER NOT NULL DEFAULT 0,
+                    note TEXT NOT NULL DEFAULT ''
+                );
+                INSERT INTO review_log_v5
+                    (id, card_id, reviewed_at, result, stage_from, stage_to,
+                     passed, total, checks_json, error_type, duration_sec, note)
+                SELECT id, card_id, reviewed_at, result, stage_from, stage_to,
+                       passed, total, checks_json, error_type, duration_sec, note
+                FROM review_log;
+                DROP TABLE review_log;
+                ALTER TABLE review_log_v5 RENAME TO review_log;
+                CREATE INDEX IF NOT EXISTS idx_review_problem ON review_log(problem_id, reviewed_at);
+                CREATE INDEX IF NOT EXISTS idx_review_card ON review_log(card_id, reviewed_at);
+                """
+            )
+
+        # 老题继承所属卡的档位和到期日
+        conn.execute(
+            """
+            UPDATE problem SET
+                stage = COALESCE((
+                    SELECT s.stage FROM card_problem cp
+                    JOIN card_state s ON s.card_id = cp.card_id
+                    JOIN pattern_card c ON c.id = cp.card_id AND c.status = 'active'
+                    WHERE cp.problem_id = problem.id
+                    ORDER BY s.stage DESC LIMIT 1), 0),
+                next_due = COALESCE((
+                    SELECT s.next_due FROM card_problem cp
+                    JOIN card_state s ON s.card_id = cp.card_id
+                    JOIN pattern_card c ON c.id = cp.card_id AND c.status = 'active'
+                    WHERE cp.problem_id = problem.id
+                    ORDER BY s.next_due ASC LIMIT 1), date('now','localtime'))
+            WHERE phase = 'active'
+            """
+        )
+        conn.execute(
+            "UPDATE problem SET next_due = date('now','localtime') WHERE next_due IS NULL"
+        )
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 

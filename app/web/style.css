@@ -90,6 +90,7 @@ body {
 .heat i.l1 { background: #c0dd97; }
 .heat i.l2 { background: #97c459; }
 .heat i.l3 { background: #639922; }
+.heat i.blank { background: transparent; }
 
 .recent-row {
   display: flex; justify-content: space-between; align-items: center;
@@ -150,6 +151,8 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 .item.done { opacity: .45; }
 .item .t { font-weight: 500; }
 .item .m { color: var(--hint); font-size: 12px; }
+
+.item .row .btn { padding: 5px 11px; font-size: 12.5px; }
 
 .badge {
   display: inline-block; font-size: 11px; padding: 1px 8px;

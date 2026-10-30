@@ -19,6 +19,11 @@ CREATE TABLE IF NOT EXISTS problem (
     status      TEXT NOT NULL DEFAULT 'inbox',      -- inbox | linked（归纳维度）
     phase       TEXT NOT NULL DEFAULT 'queued',     -- queued | active | done（进度维度）
     order_no    INTEGER,                            -- 候补队列顺序，空则按 id
+    stage       INTEGER NOT NULL DEFAULT 0,         -- 0 未复习 / 1..5 对应 1,3,7,15,30 天
+    next_due    TEXT,                               -- 下次该复习的日期
+    last_reviewed_at TEXT,
+    pass_streak INTEGER NOT NULL DEFAULT 0,
+    fail_count  INTEGER NOT NULL DEFAULT 0,
     solved      INTEGER NOT NULL DEFAULT 0,
     solved_at   TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
@@ -71,9 +76,10 @@ CREATE TABLE IF NOT EXISTS check_item (
 
 CREATE TABLE IF NOT EXISTS review_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    card_id     INTEGER NOT NULL REFERENCES pattern_card(id) ON DELETE CASCADE,
+    problem_id  INTEGER REFERENCES problem(id) ON DELETE CASCADE,
+    card_id     INTEGER REFERENCES pattern_card(id) ON DELETE CASCADE,
     reviewed_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-    result      TEXT NOT NULL,                      -- pass | hold | fail | skip
+    result      TEXT NOT NULL,                      -- correct | wrong | skip
     stage_from  INTEGER,
     stage_to    INTEGER,
     passed      INTEGER NOT NULL DEFAULT 0,
@@ -84,6 +90,7 @@ CREATE TABLE IF NOT EXISTS review_log (
     note        TEXT NOT NULL DEFAULT ''
 );
 
+CREATE INDEX IF NOT EXISTS idx_review_problem ON review_log(problem_id, reviewed_at);
 CREATE INDEX IF NOT EXISTS idx_review_card ON review_log(card_id, reviewed_at);
 
 CREATE TABLE IF NOT EXISTS daily_plan (
