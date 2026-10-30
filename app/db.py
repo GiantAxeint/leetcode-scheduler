@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import config
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 DEFAULT_SETTINGS = {
     "queue_limit": "15",          # 在途：当月要复习的不同题目上限（同一题多次复习算 1）
@@ -169,6 +169,13 @@ def migrate(conn: sqlite3.Connection) -> None:
         )
         conn.execute(
             "UPDATE problem SET next_due = date('now','localtime') WHERE next_due IS NULL"
+        )
+    if version < 6:
+        # 旧版的「标记完成」不含判定信息，把还没判过的那些复位，重新出现在今日任务里
+        conn.execute(
+            "UPDATE daily_plan SET done=0 "
+            "WHERE problem_id IS NOT NULL AND problem_id IN "
+            "(SELECT id FROM problem WHERE stage=0)"
         )
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 

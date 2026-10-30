@@ -193,6 +193,18 @@ def create_app(root: Path | None = None) -> Flask:
         c.commit()
         return jsonify({"ok": True})
 
+    @app.put("/api/plan/<int:plan_id>")
+    def api_plan_move(plan_id: int):
+        """拖到另一个班次。"""
+        c = conn()
+        b = request.get_json(force=True) or {}
+        slot = b.get("slot")
+        if slot not in SLOTS:
+            return jsonify({"error": "班次不合法"}), 400
+        c.execute("UPDATE daily_plan SET slot=? WHERE id=?", (slot, plan_id))
+        c.commit()
+        return jsonify({"ok": True, "slot": slot})
+
     @app.post("/api/plan/add")
     def api_plan_add():
         """把一道已录入的题手动补进今天某个班次。"""

@@ -148,8 +148,16 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
   background: #fff;
 }
 .item:hover { border-color: var(--blue); }
-.item.done { opacity: .45; }
 .item .t { font-weight: 500; }
+.item[draggable="true"] { cursor: grab; }
+.item.dragging { opacity: .4; border-style: dashed; cursor: grabbing; }
+
+.dropzone { transition: background .12s, border-color .12s; }
+.dropzone.drop-hover {
+  border-color: var(--blue);
+  background: #f4faff;
+  box-shadow: inset 0 0 0 1px var(--blue);
+}
 .item .m { color: var(--hint); font-size: 12px; }
 
 .item .row .btn { padding: 5px 11px; font-size: 12.5px; }
@@ -233,12 +241,17 @@ pre.code {
 .plink:hover { color: var(--blue); border-bottom-color: var(--blue); }
 
 /* LeetCode 官方难度色 */
-.plink.d-easy, .plain.d-easy { color: #00b8a3; border-bottom-color: #9ee3d8; }
-.plink.d-easy:hover { color: #00907f; border-bottom-color: #00907f; }
-.plink.d-medium, .plain.d-medium { color: #ffb800; border-bottom-color: #ffe0a3; }
-.plink.d-medium:hover { color: #d99c00; border-bottom-color: #d99c00; }
-.plink.d-hard, .plain.d-hard { color: #ff375f; border-bottom-color: #ffb3c2; }
-.plink.d-hard:hover { color: #d92a4c; border-bottom-color: #d92a4c; }
+.item.done { opacity: 1; background: #fafaf6; border-color: #e8e6df; }
+.item.done .t { color: #8f8d85; }
+.item.done .plink { border-bottom-color: #e3e1da; }
+
+/* 白底小字要看得清，LeetCode 原色对 13px 偏浅 */
+.plink.d-easy, .plain.d-easy { color: #008f7e; border-bottom-color: #9ee3d8; }
+.plink.d-easy:hover { color: #00705f; border-bottom-color: #00705f; }
+.plink.d-medium, .plain.d-medium { color: #b97e00; border-bottom-color: #ffe0a3; }
+.plink.d-medium:hover { color: #8f6100; border-bottom-color: #8f6100; }
+.plink.d-hard, .plain.d-hard { color: #dd2247; border-bottom-color: #ffb3c2; }
+.plink.d-hard:hover { color: #b01538; border-bottom-color: #b01538; }
 
 /* 难度列的圆点，跟标题同色系 */
 .dif {

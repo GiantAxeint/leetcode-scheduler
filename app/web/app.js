@@ -253,7 +253,7 @@ async function loadToday() {
     const body = items.length
       ? items.map(planItem).join('')
       : `<div class="muted" style="padding:12px 0">今天这班空的</div>`;
-    return `<div class="panel"><h3>${labels[slot]}</h3>
+    return `<div class="panel dropzone" data-slot="${slot}"><h3>${labels[slot]}</h3>
       <div class="cap">${caps[slot]}</div>${body}</div>`;
   }).join('');
   const total = Object.values(TODAY.slots).flat().length;
@@ -268,15 +268,63 @@ async function loadToday() {
     <div class="row" style="margin-top:16px">
       <button class="btn" onclick="loadToday()">刷新</button>
       <button class="btn ghost" onclick="gotoAdd()">加题</button>
+      <span class="muted">卡片可以直接拖到别的班次</span>
     </div>`;
+  bindPlanDrag();
+}
+
+/* 三个班次之间拖拽 */
+let DRAG_PLAN = null;
+
+function bindPlanDrag() {
+  $$('.item[data-plan]').forEach((el) => {
+    el.addEventListener('dragstart', (e) => {
+      DRAG_PLAN = el.dataset.plan;
+      el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', DRAG_PLAN);
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+      DRAG_PLAN = null;
+      $$('.dropzone').forEach((b) => b.classList.remove('drop-hover'));
+    });
+  });
+
+  $$('.dropzone').forEach((box) => {
+    box.addEventListener('dragover', (e) => {
+      if (!DRAG_PLAN) return;
+      e.preventDefault();
+      box.classList.add('drop-hover');
+    });
+    box.addEventListener('dragleave', (e) => {
+      if (!box.contains(e.relatedTarget)) box.classList.remove('drop-hover');
+    });
+    box.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      box.classList.remove('drop-hover');
+      const id = DRAG_PLAN || e.dataTransfer.getData('text/plain');
+      const slot = box.dataset.slot;
+      if (!id || !slot) return;
+      try {
+        await api(`/plan/${id}`, { method: 'PUT', body: { slot }, silent: true });
+      } catch (err) {
+        toast(err.message);
+        return;
+      }
+      toast('已移到' + SLOT_LABEL[slot]);
+      loadToday();
+    });
+  });
 }
 
 function planItem(r) {
   const stage = r.stage || 0;
   const badge = stage ? `S${stage} · ${STAGE_LABEL[stage]}` : '新题';
-  return `<div class="item ${r.done ? 'done' : ''}">
+  return `<div class="item ${r.done ? 'done' : ''}" draggable="true" data-plan="${r.plan_id}">
     <div class="t">${titleLink(r.title, r)}<span class="badge ${stage ? 'due' : 'new'}">${badge}</span></div>
-    <div class="m">${r.leetcode_id ? 'LeetCode ' + r.leetcode_id : '未绑定题号'}${
+    <div class="m">${r.done ? '<span style="color:#3b6d11">✓ 已处理</span> · ' : ''}${
+      r.leetcode_id ? 'LeetCode ' + r.leetcode_id : '未绑定题号'}${
       r.cards ? ' · ' + esc(r.cards) : ' · 未归题型'}</div>
     <div class="row" style="margin-top:8px">
       <button class="btn primary" onclick="quickReview(${r.problem_id},true)">答对</button>
