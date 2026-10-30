@@ -71,12 +71,30 @@ def split_ident(s: str) -> dict:
     }
 
 
+def ensure_initialized(repo: str) -> None:
+    """空仓库上 Git Data API 会 409，先用 Contents API 造一个引导提交。"""
+    try:
+        gh(f"/repos/{repo}/commits?per_page=1")
+        return
+    except RuntimeError as e:
+        if "409" not in str(e):
+            raise
+    gh(
+        f"/repos/{repo}/contents/.gitkeep",
+        "PUT",
+        {"message": "chore: init", "content": base64.b64encode(b"").decode()},
+    )
+    print("空仓库已初始化")
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print(__doc__)
         return 2
     repo = sys.argv[1]
     branch = sys.argv[2] if len(sys.argv) > 2 else "master"
+
+    ensure_initialized(repo)
 
     uploaded: set[str] = set()
     hist = commits()
@@ -118,11 +136,19 @@ def main() -> int:
         last_new = new["sha"]
         print(f"[{idx}/{len(hist)}] {new['sha'][:8]} {info['message'].splitlines()[0][:40]}")
 
-    gh(
-        f"/repos/{repo}/git/refs",
-        "POST",
-        {"ref": f"refs/heads/{branch}", "sha": last_new},
-    )
+    try:
+        gh(
+            f"/repos/{repo}/git/refs",
+            "POST",
+            {"ref": f"refs/heads/{branch}", "sha": last_new},
+        )
+    except RuntimeError:
+        # 分支已存在（引导提交建的），强制指到我们的历史
+        gh(
+            f"/repos/{repo}/git/refs/heads/{branch}",
+            "PATCH",
+            {"sha": last_new, "force": True},
+        )
     print(f"已创建分支 {branch} @ {last_new[:8]}")
     print(f"https://github.com/{repo}")
     return 0
