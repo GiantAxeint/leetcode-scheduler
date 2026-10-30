@@ -29,7 +29,7 @@ def due_cards(conn: sqlite3.Connection, today: str | None = None) -> list[sqlite
 
 
 _INFLIGHT_SQL = """
-    SELECT p.id, p.leetcode_id, p.title, p.difficulty, p.tags, p.status,
+    SELECT p.id, p.leetcode_id, p.title, p.difficulty, p.tags, p.status, p.url, p.slug,
            MIN(s.next_due) AS next_due, MAX(s.stage) AS stage
     FROM problem p
     LEFT JOIN card_problem cp ON cp.problem_id = p.id

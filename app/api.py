@@ -5,12 +5,18 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import threading
 from datetime import date, timedelta
 from pathlib import Path
 
 from flask import Flask, g, jsonify, request, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 from . import config, db, scheduler, state
+
+# 每个数据根只初始化一次；否则两个并发请求同时建表会撞写锁
+_INIT_LOCK = threading.Lock()
+_INITED: set[str] = set()
 
 
 def create_app(root: Path | None = None) -> Flask:
@@ -31,9 +37,20 @@ def create_app(root: Path | None = None) -> Flask:
 
     def conn() -> sqlite3.Connection:
         if "db" not in g:
+            root = str(app.config["ROOT"])
             g.db = db.connect(app.config["ROOT"])
-            db.init(g.db)
+            if root not in _INITED:
+                with _INIT_LOCK:
+                    if root not in _INITED:
+                        db.init(g.db)
+                        _INITED.add(root)
         return g.db
+
+    @app.errorhandler(Exception)
+    def _on_error(e):
+        if isinstance(e, HTTPException):
+            return e
+        return jsonify({"error": f"服务端错误：{e}"}), 500
 
     @app.teardown_appcontext
     def _close(_exc):
@@ -83,7 +100,7 @@ def create_app(root: Path | None = None) -> Flask:
             SELECT p.id AS plan_id, p.slot, p.done, p.card_id, p.problem_id,
                    c.title, c.category, c.trigger_signals,
                    s.stage, s.next_due,
-                   pr.title AS problem_title, pr.leetcode_id
+                   pr.title AS problem_title, pr.leetcode_id, pr.url AS problem_url, pr.slug AS problem_slug
             FROM daily_plan p
             LEFT JOIN pattern_card c ON c.id = p.card_id
             LEFT JOIN card_state  s ON s.card_id = p.card_id
@@ -159,6 +176,13 @@ def create_app(root: Path | None = None) -> Flask:
         )
         if out.archived:
             c.execute("UPDATE pattern_card SET status='archived' WHERE id=?", (card_id,))
+        if out.result == state.PASS:
+            # 这张卡挂了哪些题，就认为那些题已经做出来了
+            c.execute(
+                "UPDATE problem SET solved=1, solved_at=COALESCE(solved_at,?) "
+                "WHERE id IN (SELECT problem_id FROM card_problem WHERE card_id=?)",
+                (today.isoformat(), card_id),
+            )
 
         _log(
             c, card_id, out.result, out.stage_from, out.stage_to, passed, total,
@@ -535,6 +559,7 @@ def create_app(root: Path | None = None) -> Flask:
             return jsonify({"error": f"迁移失败：{e}"}), 500
         config.save_pointer(target)
         app.config["ROOT"] = target
+        _INITED.discard(str(target))
         return jsonify({"ok": True, "data_root": str(target)})
 
     # ---------- 统计 ----------

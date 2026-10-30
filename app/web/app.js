@@ -12,6 +12,23 @@ let REVIEW = null;
 
 const SLOT_LABEL = { morning: '早班', noon: '午班', evening: '晚班' };
 
+/* 题目链接：优先用存下来的 url，其次按 slug 拼，最后退到题库搜索 */
+function lcUrl(o) {
+  if (!o) return '';
+  if (o.url) return o.url;
+  if (o.slug) return `https://leetcode.cn/problems/${o.slug}/`;
+  if (o.leetcode_id) return `https://leetcode.cn/problemset/?search=${o.leetcode_id}`;
+  return '';
+}
+
+function titleLink(text, o) {
+  const u = lcUrl(o);
+  const t = esc(text);
+  return u
+    ? `<a class="plink" href="${esc(u)}" target="_blank" rel="noopener">${t}</a>`
+    : t;
+}
+
 async function api(path, opts = {}) {
   const { silent, ...rest } = opts;
   const res = await fetch('/api' + path, {
@@ -89,10 +106,11 @@ async function openList(kind) {
       ].filter(Boolean).join(' · ');
       const pid = r.id || r.problem_id || null;
       const cid = r.card_id || null;
+      const label = kind === 'backlog' ? esc(name) : titleLink(name, r);
       return `<div class="recent-row">
-        <span><b style="font-weight:500">${esc(name)}</b><br><span class="muted">${esc(sub)}</span></span>
-        ${pid ? `<button class="btn ghost" onclick="removeProblem(${pid},'${kind}')">移除</button>`
-          : `<button class="btn ghost" onclick="removeCard(${cid},'${kind}')">移除</button>`}
+        <span><b style="font-weight:500">${label}</b><br><span class="muted">${esc(sub)}</span></span>
+        ${pid ? `<button class="btn ghost" onclick="removeProblem(${pid},'${kind}')">删除</button>`
+          : `<button class="btn ghost" onclick="removeCard(${cid},'${kind}')">归档</button>`}
       </div>`;
     }).join('')
     : '<div class="muted" style="padding:14px 4px">空的</div>';
@@ -171,7 +189,9 @@ function cardItem(r) {
 
 function problemItem(r) {
   return `<div class="item ${r.done ? 'done' : ''}">
-    <div class="t">${esc(r.problem_title)}<span class="badge new">新题</span></div>
+    <div class="t">${titleLink(r.problem_title, {
+      url: r.problem_url, slug: r.problem_slug, leetcode_id: r.leetcode_id,
+    })}<span class="badge new">新题</span></div>
     <div class="m">${r.leetcode_id ? 'LeetCode ' + r.leetcode_id : '未绑定题号'}</div>
     <div class="row" style="margin-top:8px">
       <button class="btn" onclick="event.stopPropagation();donePlan(${r.plan_id})">标记完成</button>
@@ -398,12 +418,16 @@ function autoSlot() {
 async function loadProblems() {
   const [inbox, all] = await Promise.all([api('/problems?status=inbox'), api('/problems')]);
   const inboxRows = inbox.map((p) => `
-    <tr><td>${p.leetcode_id || ''}</td><td>${esc(p.title)}</td>
-    <td>${p.solved ? '<span class="badge" style="background:var(--green-bg);color:var(--green)">已通过</span>' : ''}</td>
-    <td><button class="btn ghost" onclick="openCardEditor(null,${p.id})">归卡</button></td></tr>`).join('');
+    <tr><td>${p.leetcode_id || ''}</td>
+    <td>${titleLink(p.title, p)}</td>
+    <td><button class="btn ghost" onclick="openCardEditor(null,${p.id})">归题型</button></td>
+    <td><button class="btn ghost" onclick="delProblem(${p.id})">删除</button></td></tr>`).join('');
   const allRows = all.slice(0, 100).map((p) => `
-    <tr><td>${p.leetcode_id || ''}</td><td>${esc(p.title)}</td><td>${esc(p.difficulty || '')}</td>
-    <td>${p.solved ? '已通过' : '未通过'}</td><td>${p.status === 'linked' ? '已挂卡' : '待归卡'}</td></tr>`).join('');
+    <tr><td>${p.leetcode_id || ''}</td>
+    <td>${titleLink(p.title, p)}</td>
+    <td>${esc(p.difficulty || '')}</td>
+    <td>${p.status === 'linked' ? '已挂题型' : '待归纳'}</td>
+    <td><button class="btn ghost" onclick="delProblem(${p.id})">删除</button></td></tr>`).join('');
   $('#view-problems').innerHTML = `
     <div class="panel" style="margin-bottom:16px">
       <h3>录入一道题</h3><div class="cap">题号、标题、难度 + 排到哪个班，一次说完</div>
@@ -423,20 +447,17 @@ async function loadProblems() {
           </select></label>
       </div>
       <label class="field"><span>标签</span><input id="p-tags" placeholder="数组,哈希"></label>
-      <label class="row" style="gap:8px;margin-bottom:12px">
-        <input type="checkbox" id="p-solved" style="width:auto"> <span class="muted">这题我已经通过了</span>
-      </label>
       <button class="btn primary" onclick="addProblem()">录入</button>
     </div>
     <div class="panel" style="margin-bottom:16px">
       <h3>待归纳题型区 <span class="badge ${inbox.length ? 'due' : ''}">${inbox.length}</span></h3>
       <div class="cap">录了但还没归到题型上的题。不设上限，但堆着不归纳等于没学</div>
-      <table><thead><tr><th>题号</th><th>标题</th><th>状态</th><th></th></tr></thead>
+      <table><thead><tr><th>题号</th><th>标题</th><th></th><th></th></tr></thead>
       <tbody>${inboxRows || '<tr><td colspan="4" class="muted">空的，很好</td></tr>'}</tbody></table>
     </div>
     <div class="panel">
       <h3>全部题目</h3><div class="cap">最近 100 条</div>
-      <table><thead><tr><th>题号</th><th>标题</th><th>难度</th><th>通过</th><th>状态</th></tr></thead>
+      <table><thead><tr><th>题号</th><th>标题</th><th>难度</th><th>状态</th><th></th></tr></thead>
       <tbody>${allRows || '<tr><td colspan="5" class="muted">还没有题</td></tr>'}</tbody></table>
     </div>`;
   $('#p-slot').value = autoSlot();
@@ -449,7 +470,6 @@ async function addProblem() {
     difficulty: $('#p-diff').value,
     tags: $('#p-tags').value.trim(),
     slot: $('#p-slot').value,
-    solved: $('#p-solved').checked,
   };
   if (!body.leetcode_id && !body.title) { toast('题号或标题至少给一个'); return; }
   try {
@@ -462,6 +482,14 @@ async function addProblem() {
   loadProblems();
   refreshGate();
   if (CURRENT_VIEW === 'today') loadToday();
+}
+
+async function delProblem(id) {
+  if (!confirm('从库里删掉这道题？它和题型的挂载关系、今日任务里的一项也会一起没了。')) return;
+  await api('/problems/' + id, { method: 'DELETE' });
+  toast('已删除');
+  loadProblems();
+  refreshGate();
 }
 
 /* ---------------- 统计 ---------------- */
@@ -692,7 +720,13 @@ const VIEWS = {
 function render() {
   $$('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === CURRENT_VIEW));
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + CURRENT_VIEW));
-  VIEWS[CURRENT_VIEW]();
+  Promise.resolve(VIEWS[CURRENT_VIEW]()).catch((e) => {
+    const host = $('#view-' + CURRENT_VIEW);
+    if (host) {
+      host.innerHTML = `<div class="panel"><h3>这个页面出错了</h3>
+        <pre class="code">${esc((e && e.stack) || e)}</pre></div>`;
+    }
+  });
   refreshGate();
 }
 

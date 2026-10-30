@@ -39,16 +39,16 @@
 .scj-fold:hover { color: #2c2c2a; }
 
 .scj-flash {
-  position: absolute;
-  right: 0;
-  top: -44px;
+  position: fixed;
+  z-index: 2147483001;
   background: #2c2c2a;
   color: #fff;
   font-size: 12.5px;
   padding: 8px 14px;
   border-radius: 8px;
   white-space: nowrap;
-  box-shadow: 0 4px 14px rgba(20, 20, 18, .18);
+  box-shadow: 0 6px 18px rgba(20, 20, 18, .22);
+  font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
 }
 .scj-flash.ok { background: #3b6d11; }
 .scj-flash.err { background: #a32d2d; }

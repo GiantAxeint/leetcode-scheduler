@@ -11,10 +11,14 @@
 
   const send = (msg) =>
     new Promise((resolve) => {
+      let done = false;
+      const finish = (v) => { if (!done) { done = true; resolve(v || { ok: false }); } };
+      // 后台 service worker 可能被浏览器休眠，兜个超时，别让按钮一直没反应
+      setTimeout(() => finish({ ok: false, offline: true }), 5000);
       try {
-        chrome.runtime.sendMessage(msg, (res) => resolve(res || { ok: false }));
+        chrome.runtime.sendMessage(msg, (res) => finish(res));
       } catch (e) {
-        resolve({ ok: false, offline: true });
+        finish({ ok: false, offline: true });
       }
     });
 
@@ -155,7 +159,11 @@
     const box = document.createElement('div');
     box.className = 'scj-flash ' + (kind || '');
     box.textContent = msg;
-    root.appendChild(box);
+    // 挂在 body 上并贴着卡片顶部，避免被卡片的 overflow:hidden 裁掉
+    const rect = root.getBoundingClientRect();
+    box.style.top = Math.max(8, rect.top - 46) + 'px';
+    box.style.right = Math.max(8, window.innerWidth - rect.right) + 'px';
+    document.body.appendChild(box);
     setTimeout(() => box.remove(), 2000);
   }
 
@@ -171,14 +179,23 @@
       slot: root.querySelector('.scj-slot').value,
       ...extra,
     };
-    const res = await send({ type: 'api', path: '/capture', method: 'POST', body });
-    if (res.ok) {
-      flash('录用成功', 'ok');
-      refreshStatus();
-    } else if (res.offline) {
-      flash('已暂存，主程序启动后自动写入', 'warn');
-    } else {
-      flash('录用失败，' + (res.error || '未知原因'), 'err');
+    const btn = root.querySelector('.scj-take');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '提交中…';
+    try {
+      const res = await send({ type: 'api', path: '/capture', method: 'POST', body });
+      if (res.ok) {
+        flash('录用成功', 'ok');
+        refreshStatus();
+      } else if (res.offline) {
+        flash('已暂存，主程序启动后自动写入', 'warn');
+      } else {
+        flash('录用失败，' + (res.error || '未知原因'), 'err');
+      }
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '录用';
     }
   }
 
