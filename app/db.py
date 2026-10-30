@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import config
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DEFAULT_SETTINGS = {
     "queue_limit": "30",          # 在途卡上限
@@ -20,6 +20,9 @@ DEFAULT_SETTINGS = {
     "pass_threshold": "0.8",      # 检验通过率阈值
     "hold_limit": "2",            # 连续几次持平整降一档
     "oral_mode": "1",             # 晚班口述模式开关
+    "total_easy": "1094",         # 题库总数（用于进度环，可改）
+    "total_medium": "2334",
+    "total_hard": "1056",
 }
 
 DEFAULT_CHECKS = [
@@ -57,8 +60,20 @@ def init(conn: sqlite3.Connection) -> None:
             "INSERT INTO check_item(name,hint,sort_order) VALUES(?,?,?)",
             [(n, h, i) for i, (n, h) in enumerate(DEFAULT_CHECKS)],
         )
-    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    migrate(conn)
     conn.commit()
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    """老库升级。新库建表时字段已齐，这里自然跳过。"""
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version < 2:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(problem)")}
+        if "solved" not in cols:
+            conn.execute("ALTER TABLE problem ADD COLUMN solved INTEGER NOT NULL DEFAULT 0")
+        if "solved_at" not in cols:
+            conn.execute("ALTER TABLE problem ADD COLUMN solved_at TEXT")
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 
 def get_setting(conn: sqlite3.Connection, key: str, default: str = "") -> str:

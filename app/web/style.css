@@ -45,6 +45,55 @@ body {
 .gate span.warn { background: var(--red-bg); color: var(--red); }
 
 .tabs { display: flex; gap: 4px; }
+
+.clock {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  color: var(--sub);
+  white-space: nowrap;
+}
+
+/* 统计页新块 */
+.stats-top { display: grid; grid-template-columns: 280px 1fr; gap: 16px; margin-bottom: 16px; }
+.donut-card { display: flex; align-items: center; justify-content: center; }
+.donut-wrap { position: relative; width: 230px; height: 230px; }
+.donut-center {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 2px;
+}
+.donut-center .big { font-size: 30px; font-weight: 500; line-height: 1.1; }
+.donut-center .big small { font-size: 14px; color: var(--hint); font-weight: 400; }
+.donut-center .tag { font-size: 12px; color: var(--green); }
+.donut-center .sub { font-size: 11px; color: var(--hint); }
+
+.diff-col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; align-content: center; }
+.diff-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  background: #f7f6f2; border-radius: 10px; padding: 18px 18px;
+}
+.diff-row .nm { font-weight: 500; }
+.diff-row .val { font-family: "Cascadia Code", Consolas, monospace; font-size: 15px; color: var(--text); }
+.easy .nm { color: var(--green); }
+.medium .nm { color: var(--amber); }
+.hard .nm { color: var(--red); }
+
+.heat {
+  display: grid; grid-auto-flow: column;
+  grid-template-rows: repeat(7, 11px);
+  gap: 3px; overflow-x: auto; padding: 10px 0 6px;
+}
+.heat i { width: 11px; height: 11px; border-radius: 2px; background: #f0efe9; display: block; }
+.heat i.l1 { background: #c0dd97; }
+.heat i.l2 { background: #97c459; }
+.heat i.l3 { background: #639922; }
+
+.recent-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 11px 4px; border-bottom: 1px solid var(--line); font-size: 13px;
+}
+.recent-row:last-child { border-bottom: none; }
+.recent-row .when { color: var(--hint); font-size: 12px; white-space: nowrap; }
 .tab {
   border: none; background: none; padding: 6px 14px; border-radius: 8px;
   cursor: pointer; font-size: 13px; color: var(--sub); font-family: inherit;

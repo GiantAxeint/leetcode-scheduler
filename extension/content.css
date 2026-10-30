@@ -1,0 +1,81 @@
+.scj-root {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  width: 268px;
+  background: #fff;
+  border: 1px solid #e3e1da;
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(20, 20, 18, .12);
+  font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  color: #2c2c2a;
+  z-index: 2147483000;
+  overflow: hidden;
+}
+
+.scj-root.folded .scj-body { display: none; }
+
+.scj-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border-bottom: 1px solid #e3e1da;
+  background: #fbfbf9;
+}
+
+.scj-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #d9d7cf; flex: none;
+}
+.scj-dot.online { background: #639922; }
+
+.scj-brand { font-weight: 500; font-size: 12.5px; }
+.scj-pending { margin-left: auto; font-size: 11px; color: #9a988f; }
+
+.scj-fold {
+  border: none; background: none; cursor: pointer;
+  font-size: 15px; line-height: 1; color: #9a988f; padding: 0 2px;
+}
+
+.scj-body { padding: 12px; }
+
+.scj-prob { display: flex; gap: 6px; align-items: baseline; margin-bottom: 4px; }
+.scj-id { color: #185fa5; font-weight: 500; }
+.scj-title {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 205px;
+}
+
+.scj-meta { color: #6b6a64; font-size: 11.5px; margin-bottom: 10px; }
+
+.scj-line {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+}
+.scj-line label { color: #9a988f; font-size: 11.5px; width: 44px; flex: none; }
+
+.scj-line select,
+.scj-newtitle {
+  flex: 1; min-width: 0;
+  font-family: inherit; font-size: 12px;
+  border: 1px solid #e3e1da; border-radius: 7px;
+  padding: 5px 7px; background: #fff; color: #2c2c2a;
+}
+
+.scj-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+.scj-btn {
+  flex: 1; border: 1px solid #e3e1da; background: #fff; color: #2c2c2a;
+  border-radius: 7px; padding: 6px 0; font-size: 12px;
+  font-family: inherit; cursor: pointer;
+}
+.scj-btn:hover { border-color: #185fa5; color: #185fa5; }
+.scj-btn.primary { background: #185fa5; border-color: #185fa5; color: #fff; }
+.scj-btn.primary:hover { opacity: .9; color: #fff; }
+
+.scj-newbox { display: flex; gap: 6px; margin-top: 8px; }
+.scj-newbox[hidden] { display: none; }
+
+.scj-hint {
+  font-size: 11px; color: #854f0b; margin-top: 8px; min-height: 14px;
+}

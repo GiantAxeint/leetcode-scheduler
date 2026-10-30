@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from flask import Flask, g, jsonify, request, send_from_directory
@@ -20,6 +20,14 @@ def create_app(root: Path | None = None) -> Flask:
     app = Flask(__name__, static_folder="web", static_url_path="")
     app.config["ROOT"] = root
     app.json.ensure_ascii = False
+
+    @app.after_request
+    def _cors(resp):
+        # 只监听 127.0.0.1，放开 CORS 让浏览器扩展能直接请求
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,OPTIONS"
+        return resp
 
     def conn() -> sqlite3.Connection:
         if "db" not in g:
@@ -37,6 +45,32 @@ def create_app(root: Path | None = None) -> Flask:
     @app.get("/")
     def index():
         return send_from_directory(app.static_folder, "index.html")
+
+    # ---------- 给扩展用的探活 ----------
+    @app.get("/api/health")
+    def api_health():
+        return jsonify({"ok": True, "app": "刷题调度", "version": "0.2.0",
+                        "data_root": str(app.config["ROOT"])})
+
+    @app.get("/api/lookup")
+    def api_lookup():
+        """扩展用：这道题是不是已经收过了。"""
+        c = conn()
+        raw = (request.args.get("leetcode_id") or "").strip()
+        if not raw.isdigit():
+            return jsonify({"exists": False})
+        row = c.execute(
+            "SELECT * FROM problem WHERE leetcode_id=?", (int(raw),)
+        ).fetchone()
+        if not row:
+            return jsonify({"exists": False})
+        cards = c.execute(
+            "SELECT c.id, c.title FROM pattern_card c "
+            "JOIN card_problem cp ON cp.card_id=c.id WHERE cp.problem_id=?",
+            (row["id"],),
+        ).fetchall()
+        return jsonify({"exists": True, "problem": dict(row),
+                        "cards": [dict(x) for x in cards]})
 
     # ---------- 今日 ----------
     @app.get("/api/today")
@@ -147,6 +181,18 @@ def create_app(root: Path | None = None) -> Flask:
     def api_plan_done(plan_id: int):
         c = conn()
         c.execute("UPDATE daily_plan SET done=1 WHERE id=?", (plan_id,))
+        c.commit()
+        return jsonify({"ok": True})
+
+    @app.post("/api/plan/add")
+    def api_plan_add():
+        """把一道已录入的题手动补进今天某个班次。"""
+        c = conn()
+        b = request.get_json(force=True) or {}
+        pid = int(b.get("problem_id") or 0)
+        if not pid:
+            return jsonify({"error": "缺 problem_id"}), 400
+        _place_in_slot(c, pid, b.get("slot"))
         c.commit()
         return jsonify({"ok": True})
 
@@ -289,13 +335,95 @@ def create_app(root: Path | None = None) -> Flask:
         title = (b.get("title") or "").strip() or (f"LeetCode {lid}" if lid else "")
         if not title:
             return jsonify({"error": "至少给个题号或标题"}), 400
+
+        if lid:
+            dup = c.execute("SELECT * FROM problem WHERE leetcode_id=?", (lid,)).fetchone()
+            if dup:
+                _place_in_slot(c, dup["id"], b.get("slot"))
+                c.commit()
+                return jsonify({"id": dup["id"], "duplicate": True})
+
         url = b.get("url") or (f"https://leetcode.cn/problems/{b['slug']}/" if b.get("slug") else "")
+        solved = 1 if b.get("solved") else 0
         cur = c.execute(
-            "INSERT INTO problem(leetcode_id,slug,title,difficulty,url,tags,status) VALUES(?,?,?,?,?,?,'inbox')",
-            (lid, b.get("slug", ""), title, b.get("difficulty", ""), url, b.get("tags", "")),
+            "INSERT INTO problem(leetcode_id,slug,title,difficulty,url,tags,status,solved,solved_at) "
+            "VALUES(?,?,?,?,?,?,'inbox',?,?)",
+            (lid, b.get("slug", ""), title, b.get("difficulty", ""), url, b.get("tags", ""),
+             solved, scheduler.today_str() if solved else None),
         )
+        pid = cur.lastrowid
+        _place_in_slot(c, pid, b.get("slot"))
         c.commit()
-        return jsonify({"id": cur.lastrowid})
+        return jsonify({"id": pid})
+
+    @app.put("/api/problems/<int:pid>")
+    def api_problem_update(pid: int):
+        c = conn()
+        b = request.get_json(force=True) or {}
+        if "solved" in b:
+            solved = 1 if b["solved"] else 0
+            c.execute(
+                "UPDATE problem SET solved=?, solved_at=? WHERE id=?",
+                (solved, scheduler.today_str() if solved else None, pid),
+            )
+        c.commit()
+        return jsonify({"ok": True})
+
+    @app.post("/api/capture")
+    def api_capture():
+        """扩展专用：一步搞定「入库 + 挂卡 + 排班」，方便离线排队重放。"""
+        c = conn()
+        b = request.get_json(force=True) or {}
+        raw = str(b.get("leetcode_id") or "").strip()
+        lid = int(raw) if raw.isdigit() else None
+        title = (b.get("title") or "").strip() or (f"LeetCode {lid}" if lid else "")
+        if not title:
+            return jsonify({"error": "缺标题"}), 400
+
+        created = False
+        row = None
+        if lid:
+            row = c.execute("SELECT * FROM problem WHERE leetcode_id=?", (lid,)).fetchone()
+        if row:
+            pid = row["id"]
+            if b.get("solved"):
+                c.execute(
+                    "UPDATE problem SET solved=1, solved_at=COALESCE(solved_at,?) WHERE id=?",
+                    (scheduler.today_str(), pid),
+                )
+        else:
+            solved = 1 if b.get("solved") else 0
+            cur = c.execute(
+                "INSERT INTO problem(leetcode_id,slug,title,difficulty,url,tags,status,solved,solved_at) "
+                "VALUES(?,?,?,?,?,?,'inbox',?,?)",
+                (lid, b.get("slug", ""), title, b.get("difficulty", ""), b.get("url", ""),
+                 b.get("tags", ""), solved, scheduler.today_str() if solved else None),
+            )
+            pid = cur.lastrowid
+            created = True
+
+        card_id = b.get("card_id")
+        if not card_id and (b.get("new_card_title") or "").strip():
+            cur = c.execute(
+                "INSERT INTO pattern_card(title,trigger_signals,category) VALUES(?,?,?)",
+                (b["new_card_title"].strip(), b.get("new_card_trigger", ""), b.get("category", "")),
+            )
+            card_id = cur.lastrowid
+            c.execute(
+                "INSERT INTO card_state(card_id,stage,next_due) VALUES(?,1,?)",
+                (card_id, scheduler.today_str()),
+            )
+        if card_id:
+            c.execute(
+                "INSERT OR IGNORE INTO card_problem(card_id,problem_id) VALUES(?,?)",
+                (card_id, pid),
+            )
+            c.execute("UPDATE problem SET status='linked' WHERE id=?", (pid,))
+
+        _place_in_slot(c, pid, b.get("slot"))
+        c.commit()
+        return jsonify({"problem_id": pid, "created": created, "card_id": card_id,
+                        "duplicate": not created})
 
     @app.post("/api/problems/<int:pid>/link")
     def api_problem_link(pid: int):
@@ -390,6 +518,45 @@ def create_app(root: Path | None = None) -> Flask:
     def api_stats():
         c = conn()
         one = lambda q, a=(): c.execute(q, a).fetchone()[0]
+
+        # ---- 解题进度（本地口径）----
+        diff_rows = c.execute(
+            "SELECT COALESCE(NULLIF(difficulty,''),'未标注') d, COALESCE(SUM(solved),0) s "
+            "FROM problem GROUP BY d"
+        ).fetchall()
+        by_diff = {r["d"]: r["s"] for r in diff_rows}
+        totals = {
+            "简单": db.get_int(c, "total_easy", 1094),
+            "中等": db.get_int(c, "total_medium", 2334),
+            "困难": db.get_int(c, "total_hard", 1056),
+        }
+        progress, solved_all, total_all = [], 0, 0
+        for name, tot in totals.items():
+            s = by_diff.get(name, 0)
+            progress.append({"name": name, "solved": s, "total": tot})
+            solved_all += s
+            total_all += tot
+
+        # ---- 日历（过去一年每天复习次数）----
+        cal_rows = c.execute(
+            "SELECT substr(reviewed_at,1,10) d, COUNT(*) n FROM review_log "
+            "WHERE reviewed_at >= date('now','localtime','-365 day') GROUP BY d"
+        ).fetchall()
+        calendar = {r["d"]: r["n"] for r in cal_rows}
+
+        streak, cursor = 0, date.today()
+        if cursor.isoformat() not in calendar:
+            cursor -= timedelta(days=1)
+        while cursor.isoformat() in calendar:
+            streak += 1
+            cursor -= timedelta(days=1)
+
+        recent = c.execute(
+            "SELECT r.reviewed_at, r.card_id, k.title FROM review_log r "
+            "JOIN pattern_card k ON k.id=r.card_id WHERE r.result='pass' "
+            "ORDER BY r.reviewed_at DESC LIMIT 12"
+        ).fetchall()
+
         by_stage = [
             dict(r) for r in c.execute(
                 "SELECT stage_from AS stage, COUNT(*) n, SUM(result='pass') p "
@@ -414,6 +581,17 @@ def create_app(root: Path | None = None) -> Flask:
             "inbox": one("SELECT COUNT(*) FROM problem WHERE status='inbox'"),
             "due_today": len(scheduler.due_cards(c)),
             "reviews": one("SELECT COUNT(*) FROM review_log"),
+            "gate": scheduler.gate(c),
+            "backlog": scheduler.backlog(c),
+            "progress": progress,
+            "progress_total": {"solved": solved_all, "total": total_all},
+            "calendar": calendar,
+            "calendar_stats": {
+                "total": sum(calendar.values()),
+                "active_days": len(calendar),
+                "streak": streak,
+            },
+            "recent_pass": [dict(r) for r in recent],
             "by_stage": by_stage,
             "errors": errors,
             "daily": list(reversed(daily)),
@@ -445,6 +623,25 @@ def create_app(root: Path | None = None) -> Flask:
 
 
 # ---------- 辅助 ----------
+SLOTS = ("morning", "noon", "evening")
+
+
+def _place_in_slot(c: sqlite3.Connection, problem_id: int, slot: str | None) -> None:
+    """给了班次就直接排进今天的那个班；没给就留在待归卡区等下一次排班。"""
+    if slot not in SLOTS or not problem_id:
+        return
+    today = scheduler.today_str()
+    exists = c.execute(
+        "SELECT 1 FROM daily_plan WHERE plan_date=? AND problem_id=?", (today, problem_id)
+    ).fetchone()
+    if exists:
+        return
+    c.execute(
+        "INSERT INTO daily_plan(plan_date, slot, problem_id) VALUES(?,?,?)",
+        (today, slot, problem_id),
+    )
+
+
 def _active_checks(c: sqlite3.Connection):
     return c.execute(
         "SELECT * FROM check_item WHERE is_active=1 ORDER BY sort_order, id"

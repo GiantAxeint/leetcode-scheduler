@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS problem (
     url         TEXT,
     tags        TEXT,
     status      TEXT NOT NULL DEFAULT 'inbox',      -- inbox | linked
+    solved      INTEGER NOT NULL DEFAULT 0,
+    solved_at   TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 

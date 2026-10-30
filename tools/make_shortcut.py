@@ -24,7 +24,7 @@ def _uni(s: str) -> bytes:
     return s.encode("utf-16-le") + b"\x00\x00"
 
 
-def build(target: Path, workdir: Path, desc: str = "") -> bytes:
+def build(target: Path, workdir: Path, desc: str = "", args: str = "", minimized: bool = False) -> bytes:
     t, w = str(target), str(workdir)
 
     vol = struct.pack("<IIII", 0x11, 3, 0, 0x10) + b"\x00"  # 17 字节，空卷标
@@ -46,16 +46,20 @@ def build(target: Path, workdir: Path, desc: str = "") -> bytes:
     linkinfo += vol + lbp + cps + lbp_u + cps_u
 
     flags = 0x02 | 0x80 | 0x10  # HasLinkInfo | IsUnicode | HasWorkingDir
+    if args:
+        flags |= 0x20  # HasArguments
     head = struct.pack("<I", 0x4C) + CLSID
     head += struct.pack("<II", flags, 0x20)      # flags + FILE_ATTRIBUTE_ARCHIVE
     head += b"\x00" * 24                         # 三个时间戳
     head += struct.pack("<I", 0)                 # FileSize（目标非文件时 0）
     head += struct.pack("<i", 0)                 # IconIndex
-    head += struct.pack("<I", 1)                 # SW_SHOWNORMAL
+    head += struct.pack("<I", 7 if minimized else 1)  # SW_SHOWMINNOACTIVE / SW_SHOWNORMAL
     head += struct.pack("<HH", 0, 0)             # HotKey + Reserved
     head += struct.pack("<II", 0, 0)             # Reserved2/3
 
     sdata = struct.pack("<H", len(w)) + w.encode("utf-16-le")
+    if args:
+        sdata += struct.pack("<H", len(args)) + args.encode("utf-16-le")
     extra = struct.pack("<II", 4, 0)
     return head + linkinfo + sdata + extra
 
@@ -65,10 +69,12 @@ def main() -> int:
         print(__doc__)
         return 2
     target, workdir, out = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
-    blob = build(target, workdir)
+    args = sys.argv[4] if len(sys.argv) > 4 else ""
+    minimized = "--min" in sys.argv
+    blob = build(target, workdir, args=args, minimized=minimized)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(blob)
-    print(f"{out}  {len(blob)} bytes  -> {target}")
+    print(f"{out}  {len(blob)} bytes  -> {target} {args}".rstrip())
     return 0
 
 

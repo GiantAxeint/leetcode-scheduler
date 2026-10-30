@@ -34,6 +34,7 @@ def _open(url: str) -> None:
 
 
 def main() -> int:
+    silent = any(a in sys.argv[1:] for a in ("--silent", "-s"))
     app = create_app()
     port = free_port()
     url = f"http://127.0.0.1:{port}/"
@@ -42,7 +43,8 @@ def main() -> int:
     print(f"数据目录：{app.config['ROOT']}")
     print("关闭这个窗口即退出。")
 
-    threading.Timer(0.8, lambda: _open(url)).start()
+    if not silent:
+        threading.Timer(0.8, lambda: _open(url)).start()
 
     try:
         from waitress import serve

@@ -20,8 +20,23 @@ A local spaced-repetition scheduler for LeetCode. The unit of review is a **patt
 - **两道闸门**：在途卡 ≤ 30（可调），待归卡区 ≤ 20（可调）。满了只清不进。
 - **间隔阶梯**：1 / 3 / 7 / 15 / 30 天（可调）。通过升一档，挂退一档，持平原地，连续两次持平整降档。
 - **判定不看绝对项数**：`通过率 >= 阈值` 即通过。检验项可以自己增删改名。
-- **三个时段**：早班新题、午班到期卡、晚班口述（不写码）。数量都能改。
+- **三个时段**：早班新题、午班到期卡、晚班口述（不写码）。数量都能改；录入时可指定排进哪一班。
 - **归档**：最后一档通过 → 出池，不再复习；可从卡库手动"回炉"。
+- **统计**：解题进度环（按难度分色）、过去一年日历热力图、最近通过列表。
+- **浏览器扩展**：在 LeetCode 题目页直接抓题号/题名/难度/标签，点一下就录用。
+
+## 浏览器扩展
+
+Edge 打开 `edge://extensions/` → 开开发人员模式 → 加载解压缩的扩展 → 选 `F:\WB-box\刷题调度\extension`。
+
+明细见 [docs/扩展安装.md](docs/扩展安装.md)。要点：**主程序没开也不会丢数据**，扩展会先存进本地队列，等主程序上线后自动补写（每分钟检查一次）。
+
+主程序支持 `--silent`（起服务但不弹浏览器），配合开机启动可以做到"永远在线"：
+
+```bash
+python tools/install_autostart.py "F:\WB-box\刷题调度\刷题调度.exe"          # 安装
+python tools/install_autostart.py "F:\WB-box\刷题调度\刷题调度.exe" --remove  # 卸载
+```
 
 ## 跑起来
 
@@ -51,15 +66,19 @@ python -m venv .venv
 ```
 刷题调度/
 ├─ app/
-│  ├─ api.py           HTTP 接口
+│  ├─ api.py           HTTP 接口（含 /capture 供扩展一步入库）
 │  ├─ scheduler.py     到期计算 / 闸门 / 每日排班
 │  ├─ state.py         卡片状态机（纯函数，可单测）
-│  ├─ db.py            连接 / 建表 / 默认值
+│  ├─ db.py            连接 / 建表 / 迁移
 │  ├─ config.py        数据根定位（多级回退）
 │  ├─ schema.sql       建表语句
 │  └─ web/             单页前端（零依赖）
+├─ extension/          Edge/Chrome 扩展（MV3）
+├─ tools/              打包辅助：快捷方式、开机启动
+├─ assets/             图标
 ├─ tests/              调度与状态机的单元测试
 ├─ docs/SPEC.md        需求规格与数据模型
+├─ docs/扩展安装.md     扩展安装与行为说明
 └─ run.py              入口
 ```
 

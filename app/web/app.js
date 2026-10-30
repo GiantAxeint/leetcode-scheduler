@@ -10,6 +10,8 @@ let TODAY = null;
 let CURRENT_VIEW = 'today';
 let REVIEW = null;
 
+const SLOT_LABEL = { morning: '早班', noon: '午班', evening: '晚班' };
+
 async function api(path, opts = {}) {
   const res = await fetch('/api' + path, {
     headers: { 'Content-Type': 'application/json' },
@@ -42,7 +44,20 @@ function closeModal() {
   REVIEW = null;
 }
 
-/* ---------------- 顶部状态 ---------------- */
+/* ---------------- 顶部时钟 ---------------- */
+function tickClock() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  const week = '日一二三四五六'[d.getDay()];
+  $('#clock').textContent =
+    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} 周${week} ` +
+    `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function startClock() {
+  tickClock();
+  setInterval(tickClock, 1000);
+}
+
 function renderGate(g, backlog) {
   const warn = (a, b) => (a >= b ? 'warn' : '');
   $('#gate').innerHTML = `
@@ -304,17 +319,23 @@ async function deleteCard(id) {
 }
 
 /* ---------------- 题目 ---------------- */
+function autoSlot() {
+  const h = new Date().getHours();
+  return h < 12 ? 'morning' : h < 18 ? 'noon' : 'evening';
+}
+
 async function loadProblems() {
   const [inbox, all] = await Promise.all([api('/problems?status=inbox'), api('/problems')]);
   const inboxRows = inbox.map((p) => `
-    <tr><td>${p.leetcode_id || ''}</td><td>${esc(p.title)}</td><td>${esc(p.difficulty || '')}</td>
+    <tr><td>${p.leetcode_id || ''}</td><td>${esc(p.title)}</td>
+    <td>${p.solved ? '<span class="badge" style="background:var(--green-bg);color:var(--green)">已通过</span>' : ''}</td>
     <td><button class="btn ghost" onclick="openCardEditor(null,${p.id})">归卡</button></td></tr>`).join('');
   const allRows = all.slice(0, 100).map((p) => `
     <tr><td>${p.leetcode_id || ''}</td><td>${esc(p.title)}</td><td>${esc(p.difficulty || '')}</td>
-    <td>${p.status === 'linked' ? '已挂卡' : '待归卡'}</td></tr>`).join('');
+    <td>${p.solved ? '已通过' : '未通过'}</td><td>${p.status === 'linked' ? '已挂卡' : '待归卡'}</td></tr>`).join('');
   $('#view-problems').innerHTML = `
     <div class="panel" style="margin-bottom:16px">
-      <h3>录入一道题</h3><div class="cap">题号、标题、难度，先丢进待归卡区</div>
+      <h3>录入一道题</h3><div class="cap">题号、标题、难度 + 排到哪个班，一次说完</div>
       <div class="grid2">
         <label class="field"><span>LeetCode 题号</span><input id="p-id" placeholder="1"></label>
         <label class="field"><span>标题</span><input id="p-title" placeholder="Two Sum"></label>
@@ -322,21 +343,32 @@ async function loadProblems() {
       <div class="grid2">
         <label class="field"><span>难度</span>
           <select id="p-diff"><option value="">—</option><option>简单</option><option>中等</option><option>困难</option></select></label>
-        <label class="field"><span>标签</span><input id="p-tags" placeholder="数组,哈希"></label>
+        <label class="field"><span>排进今天哪一班</span>
+          <select id="p-slot">
+            <option value="">不排（只进待归卡区）</option>
+            <option value="morning">早班</option>
+            <option value="noon">午班</option>
+            <option value="evening">晚班</option>
+          </select></label>
       </div>
+      <label class="field"><span>标签</span><input id="p-tags" placeholder="数组,哈希"></label>
+      <label class="row" style="gap:8px;margin-bottom:12px">
+        <input type="checkbox" id="p-solved" style="width:auto"> <span class="muted">这题我已经通过了</span>
+      </label>
       <button class="btn primary" onclick="addProblem()">录入</button>
     </div>
     <div class="panel" style="margin-bottom:16px">
       <h3>待归卡区 <span class="badge ${inbox.length ? 'due' : ''}">${inbox.length}</span></h3>
       <div class="cap">这些题还没挂到任何题型卡上，多了会堵住入口</div>
-      <table><thead><tr><th>题号</th><th>标题</th><th>难度</th><th></th></tr></thead>
+      <table><thead><tr><th>题号</th><th>标题</th><th>状态</th><th></th></tr></thead>
       <tbody>${inboxRows || '<tr><td colspan="4" class="muted">空的，很好</td></tr>'}</tbody></table>
     </div>
     <div class="panel">
       <h3>全部题目</h3><div class="cap">最近 100 条</div>
-      <table><thead><tr><th>题号</th><th>标题</th><th>难度</th><th>状态</th></tr></thead>
-      <tbody>${allRows || '<tr><td colspan="4" class="muted">还没有题</td></tr>'}</tbody></table>
+      <table><thead><tr><th>题号</th><th>标题</th><th>难度</th><th>通过</th><th>状态</th></tr></thead>
+      <tbody>${allRows || '<tr><td colspan="5" class="muted">还没有题</td></tr>'}</tbody></table>
     </div>`;
+  $('#p-slot').value = autoSlot();
 }
 
 async function addProblem() {
@@ -345,16 +377,84 @@ async function addProblem() {
     title: $('#p-title').value.trim(),
     difficulty: $('#p-diff').value,
     tags: $('#p-tags').value.trim(),
+    slot: $('#p-slot').value,
+    solved: $('#p-solved').checked,
   };
   if (!body.leetcode_id && !body.title) { toast('题号或标题至少给一个'); return; }
-  await api('/problems', { method: 'POST', body });
-  toast('已进待归卡区');
+  const r = await api('/problems', { method: 'POST', body });
+  toast(r.duplicate ? '这题已经在库里了' : (body.slot ? '已排进' + SLOT_LABEL[body.slot] : '已进待归卡区'));
   loadProblems();
+  if (CURRENT_VIEW === 'today') loadToday();
 }
 
 /* ---------------- 统计 ---------------- */
+function relTime(s) {
+  if (!s) return '';
+  const t = new Date(String(s).replace(' ', 'T'));
+  const diff = (Date.now() - t.getTime()) / 1000;
+  if (diff < 60) return '刚刚';
+  if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+  if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+  const d = Math.floor(diff / 86400);
+  if (d < 30) return d + ' 天前';
+  if (d < 365) return Math.floor(d / 30) + ' 个月前';
+  return Math.floor(d / 365) + ' 年前';
+}
+
+function buildDonut(progress, total) {
+  const R = 86, C = 2 * Math.PI * R, CX = 115;
+  const sum = progress.reduce((a, b) => a + b.total, 0) || 1;
+  const colors = ['#1D9E75', '#EF9F27', '#E24B4A'];
+  let acc = 0;
+  const segs = progress.map((p, i) => {
+    const len = (p.total / sum) * C;
+    const seg = `<circle cx="${CX}" cy="${CX}" r="${R}" fill="none" stroke="${colors[i]}"
+      stroke-opacity="0.30" stroke-width="13"
+      stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-acc}"
+      transform="rotate(-90 ${CX} ${CX})"/>`;
+    acc += len;
+    return seg;
+  }).join('');
+  const ratio = total.total ? Math.min(1, total.solved / total.total) : 0;
+  const arc = ratio > 0.001
+    ? `<circle cx="${CX}" cy="${CX}" r="${R}" fill="none" stroke="#185FA5" stroke-width="13"
+        stroke-linecap="round" stroke-dasharray="${C * ratio} ${C}" transform="rotate(-90 ${CX} ${CX})"/>`
+    : '';
+  return `<svg viewBox="0 0 230 230" width="230" height="230" role="img">
+    <title>解题进度</title>${segs}${arc}</svg>`;
+}
+
+function buildHeat(cal) {
+  const end = new Date(); end.setHours(0, 0, 0, 0);
+  const start = new Date(end); start.setDate(start.getDate() - 364);
+  start.setDate(start.getDate() - start.getDay());
+  const cells = [];
+  const d = new Date(start);
+  while (d <= end) {
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const n = cal[key] || 0;
+    const lv = n === 0 ? '' : n <= 2 ? 'l1' : n <= 4 ? 'l2' : 'l3';
+    cells.push(`<i class="${lv}" title="${key}　${n} 次"></i>`);
+    d.setDate(d.getDate() + 1);
+  }
+  return `<div class="heat">${cells.join('')}</div>`;
+}
+
 async function loadStats() {
   const s = await api('/stats');
+  if (s.gate) renderGate(s.gate, s.backlog || 0);
+  const p = s.progress_total;
+  const diffRows = s.progress.map((x, i) => `
+    <div class="diff-row ${['easy', 'medium', 'hard'][i]}">
+      <span class="nm">${x.name}</span><span class="val">${x.solved}/${x.total}</span>
+    </div>`).join('');
+  const cs = s.calendar_stats;
+  const recent = s.recent_pass.length
+    ? s.recent_pass.map((r) => `
+      <div class="recent-row"><span>${esc(r.title)}</span>
+      <span class="when">${relTime(r.reviewed_at)}</span></div>`).join('')
+    : '<div class="muted" style="padding:14px 4px">还没有通过记录</div>';
+
   const maxDay = Math.max(1, ...s.daily.map((d) => d.n));
   const days = s.daily.map((d) => `
     <div class="row" style="margin-bottom:6px">
@@ -367,13 +467,37 @@ async function loadStats() {
     const rate = b.n ? Math.round((b.p / b.n) * 100) : 0;
     return `<tr><td>S${b.stage}</td><td>${b.n}</td><td>${rate}%</td></tr>`;
   }).join('');
+
   $('#view-stats').innerHTML = `
-    <div class="stat-grid">
-      <div class="stat"><b>${s.active}</b><span>在途卡</span></div>
-      <div class="stat"><b>${s.archived}</b><span>已归档</span></div>
-      <div class="stat"><b>${s.due_today}</b><span>今日到期</span></div>
-      <div class="stat"><b>${s.reviews}</b><span>累计复习</span></div>
+    <div class="stats-top">
+      <div class="panel donut-card">
+        <div class="donut-wrap">
+          ${buildDonut(s.progress, p)}
+          <div class="donut-center">
+            <div class="big">${p.solved}<small>/${p.total}</small></div>
+            <div class="tag">✓ 已解答</div>
+            <div class="sub">在途 ${s.active} · 归档 ${s.archived}</div>
+          </div>
+        </div>
+      </div>
+      <div class="diff-col">${diffRows}</div>
     </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="row">
+        <h3 style="margin:0">过去一年共复习 ${cs.total} 次</h3>
+        <div class="spacer"></div>
+        <span class="muted">累计 ${cs.active_days} 天 · 连续 ${cs.streak} 天</span>
+      </div>
+      ${buildHeat(s.calendar)}
+      <div class="muted">颜色越深，当天复习次数越多；悬停看具体日期</div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <h3>最近通过</h3><div class="cap">阅卷过了的卡，最近的在前</div>
+      ${recent}
+    </div>
+
     <div class="cols">
       <div class="panel"><h3>最近 14 天</h3><div class="cap">每天复习了几次</div>${days || '<div class="muted">还没数据</div>'}</div>
       <div class="panel"><h3>各档通过率</h3><div class="cap">哪一档最容易挂</div>
@@ -411,6 +535,15 @@ async function loadSettings() {
       <button class="btn primary" onclick="saveSettings()">保存</button>
     </div>
     <div class="panel" style="margin-bottom:16px">
+      <h3>题库总数</h3><div class="cap">只影响统计页那个进度环，随便改</div>
+      <div class="cols">
+        <label class="field"><span>简单</span><input id="s-te" type="number" value="${st.total_easy}"></label>
+        <label class="field"><span>中等</span><input id="s-tm" type="number" value="${st.total_medium}"></label>
+        <label class="field"><span>困难</span><input id="s-th" type="number" value="${st.total_hard}"></label>
+      </div>
+      <button class="btn" onclick="saveTotals()">保存总数</button>
+    </div>
+    <div class="panel" style="margin-bottom:16px">
       <h3>检验项</h3><div class="cap">数量、名称自己定；判定用通过率，所以增减不影响算法</div>
       ${checkRows || '<div class="muted">没有启用的检验项</div>'}
       <div class="row" style="margin-top:12px">
@@ -446,6 +579,14 @@ async function saveSettings() {
   loadToday();
 }
 
+async function saveTotals() {
+  await api('/settings', {
+    method: 'PUT',
+    body: { total_easy: $('#s-te').value, total_medium: $('#s-tm').value, total_hard: $('#s-th').value },
+  });
+  toast('已保存');
+}
+
 async function addCheck() {
   const name = $('#c-name').value.trim();
   if (!name) { toast('给个名字'); return; }
@@ -477,14 +618,27 @@ function render() {
   $$('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === CURRENT_VIEW));
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + CURRENT_VIEW));
   VIEWS[CURRENT_VIEW]();
+  refreshGate();
+}
+
+/* 切页时顶部状态条不该消失 */
+async function refreshGate() {
+  try {
+    const t = await api('/today');
+    TODAY = t;
+    renderGate(t.gate, t.backlog);
+  } catch (e) { /* 离线就先不更新 */ }
 }
 
 $('#tabs').addEventListener('click', (e) => {
   const b = e.target.closest('.tab');
   if (!b) return;
   CURRENT_VIEW = b.dataset.view;
+  location.hash = CURRENT_VIEW;
   render();
 });
+
+if (VIEWS[location.hash.slice(1)]) CURRENT_VIEW = location.hash.slice(1);
 
 $('#modal').addEventListener('click', (e) => {
   if (e.target.id === 'modal') closeModal();
@@ -493,4 +647,5 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeModal();
 });
 
+startClock();
 render();

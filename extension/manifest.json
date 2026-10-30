@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "刷题调度",
+  "version": "0.2.0",
+  "description": "把当前 LeetCode 题目录用进本地刷题调度，主程序没开也不会丢。",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": [
+    "https://leetcode.cn/*",
+    "https://leetcode.com/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
+  "action": {
+    "default_title": "刷题调度",
+    "default_icon": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://leetcode.cn/problems/*", "https://leetcode.com/problems/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
