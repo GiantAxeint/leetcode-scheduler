@@ -186,7 +186,9 @@
     try {
       const res = await send({ type: 'api', path: '/capture', method: 'POST', body });
       if (res.ok) {
-        flash('录用成功', 'ok');
+        const d = res.data || {};
+        if (d.queued) flash('已录用，在途已满，排进候补', 'warn');
+        else flash('录用成功', 'ok');
         refreshStatus();
       } else if (res.offline) {
         flash('已暂存，主程序启动后自动写入', 'warn');

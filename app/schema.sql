@@ -16,7 +16,9 @@ CREATE TABLE IF NOT EXISTS problem (
     difficulty  TEXT,
     url         TEXT,
     tags        TEXT,
-    status      TEXT NOT NULL DEFAULT 'inbox',      -- inbox | linked
+    status      TEXT NOT NULL DEFAULT 'inbox',      -- inbox | linked（归纳维度）
+    phase       TEXT NOT NULL DEFAULT 'queued',     -- queued | active | done（进度维度）
+    order_no    INTEGER,                            -- 候补队列顺序，空则按 id
     solved      INTEGER NOT NULL DEFAULT 0,
     solved_at   TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import config
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 DEFAULT_SETTINGS = {
     "queue_limit": "15",          # 在途：当月要复习的不同题目上限（同一题多次复习算 1）
@@ -79,6 +79,23 @@ def migrate(conn: sqlite3.Connection) -> None:
         if row and row["value"] == "30":
             conn.execute("UPDATE settings SET value='15' WHERE key='queue_limit'")
         conn.execute("UPDATE settings SET value='999' WHERE key='inbox_limit' AND value='20'")
+    if version < 4:
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(problem)")}
+        if "phase" not in cols:
+            conn.execute("ALTER TABLE problem ADD COLUMN phase TEXT NOT NULL DEFAULT 'queued'")
+        if "order_no" not in cols:
+            conn.execute("ALTER TABLE problem ADD COLUMN order_no INTEGER")
+        # 老数据全按「在途」处理，超出的进候补
+        limit = int(
+            (conn.execute("SELECT value FROM settings WHERE key='queue_limit'").fetchone()
+             or {"value": "15"})["value"]
+        )
+        ids = [r["id"] for r in conn.execute("SELECT id FROM problem ORDER BY id")]
+        for i, pid in enumerate(ids):
+            conn.execute(
+                "UPDATE problem SET phase=? WHERE id=?",
+                ("active" if i < limit else "queued", pid),
+            )
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 

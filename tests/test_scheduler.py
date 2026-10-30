@@ -44,9 +44,9 @@ def test_due_card_appears_in_plan(conn):
     assert cid in [r["card_id"] for r in rows]
 
 
-def _link(c, cid, title="Two Sum"):
+def _link(c, cid, title="Two Sum", phase="active"):
     pid = c.execute(
-        "INSERT INTO problem(title,status) VALUES(?, 'linked')", (title,)
+        "INSERT INTO problem(title,status,phase) VALUES(?, 'linked', ?)", (title, phase)
     ).lastrowid
     c.execute("INSERT INTO card_problem(card_id,problem_id) VALUES(?,?)", (cid, pid))
     c.commit()
@@ -59,22 +59,43 @@ def test_gate_counts_distinct_problems(conn):
     db.set_setting(conn, "queue_limit", 1)
     g = scheduler.gate(conn)
     assert g["active"] == 1
-    assert g["can_add_problem"] is False
+    assert g["can_add"] is False
 
 
-def test_same_problem_on_two_cards_counts_once(conn):
-    a = _add_card(conn, "卡A")
-    b = _add_card(conn, "卡B")
-    pid = _link(conn, a)
-    conn.execute("INSERT INTO card_problem(card_id,problem_id) VALUES(?,?)", (b, pid))
-    conn.commit()
-    assert scheduler.gate(conn)["active"] == 1
-
-
-def test_gate_ignores_archived_cards(conn):
+def test_queued_problem_not_in_flight(conn):
     cid = _add_card(conn)
-    _link(conn, cid)
-    conn.execute("UPDATE pattern_card SET status='archived' WHERE id=?", (cid,))
+    _link(conn, cid, phase="queued")
+    g = scheduler.gate(conn)
+    assert g["active"] == 0
+    assert g["queued"] == 1
+
+
+def test_refill_pulls_from_queue_head(conn):
+    db.set_setting(conn, "queue_limit", 1)
+    for t in ("A", "B", "C"):
+        conn.execute("INSERT INTO problem(title,phase) VALUES(?, 'queued')", (t,))
+    conn.commit()
+    assert scheduler.refill(conn) == 1
+    g = scheduler.gate(conn)
+    assert g["active"] == 1 and g["queued"] == 2
+
+
+def test_queue_order_is_respected(conn):
+    ids = []
+    for t in ("A", "B", "C"):
+        ids.append(conn.execute(
+            "INSERT INTO problem(title,phase) VALUES(?, 'queued')", (t,)
+        ).lastrowid)
+    conn.commit()
+    scheduler.queue_order(conn, [ids[2], ids[0], ids[1]])
+    rows = scheduler.queued_problems(conn)
+    assert [r["title"] for r in rows] == ["C", "A", "B"]
+
+
+def test_archived_card_problem_leaves_flight(conn):
+    cid = _add_card(conn)
+    pid = _link(conn, cid)
+    conn.execute("UPDATE problem SET phase='done' WHERE id=?", (pid,))
     conn.commit()
     assert scheduler.gate(conn)["active"] == 0
 

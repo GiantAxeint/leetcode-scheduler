@@ -176,6 +176,12 @@ def create_app(root: Path | None = None) -> Flask:
         )
         if out.archived:
             c.execute("UPDATE pattern_card SET status='archived' WHERE id=?", (card_id,))
+            c.execute(
+                "UPDATE problem SET phase='done' WHERE id IN "
+                "(SELECT problem_id FROM card_problem WHERE card_id=?)",
+                (card_id,),
+            )
+            scheduler.refill(c)
         if out.result == state.PASS:
             # 这张卡挂了哪些题，就认为那些题已经做出来了
             c.execute(
@@ -216,6 +222,9 @@ def create_app(root: Path | None = None) -> Flask:
         pid = int(b.get("problem_id") or 0)
         if not pid:
             return jsonify({"error": "缺 problem_id"}), 400
+        row = c.execute("SELECT phase FROM problem WHERE id=?", (pid,)).fetchone()
+        if row and row["phase"] != "active":
+            return jsonify({"error": "这题还在候补队列里，先提到在途"}), 409
         _place_in_slot(c, pid, b.get("slot"))
         c.commit()
         return jsonify({"ok": True})
@@ -316,7 +325,13 @@ def create_app(root: Path | None = None) -> Flask:
         c.execute(
             "UPDATE card_state SET archived_at=? WHERE card_id=?", (scheduler.today_str(), cid)
         )
+        c.execute(
+            "UPDATE problem SET phase='done' WHERE id IN "
+            "(SELECT problem_id FROM card_problem WHERE card_id=?)",
+            (cid,),
+        )
         c.commit()
+        scheduler.refill(c)
         return jsonify({"ok": True})
 
     @app.post("/api/cards/<int:cid>/reopen")
@@ -362,11 +377,53 @@ def create_app(root: Path | None = None) -> Flask:
         c = conn()
         return jsonify([dict(r) for r in scheduler.backlog_cards(c)])
 
+    @app.get("/api/queued")
+    def api_queued():
+        """候补队列。"""
+        c = conn()
+        return jsonify([dict(r) for r in scheduler.queued_problems(c)])
+
+    @app.put("/api/queued/order")
+    def api_queued_order():
+        c = conn()
+        b = request.get_json(force=True) or {}
+        ids = [int(x) for x in (b.get("ids") or [])]
+        scheduler.queue_order(c, ids)
+        return jsonify({"ok": True, "count": len(ids)})
+
+    @app.post("/api/problems/<int:pid>/activate")
+    def api_problem_activate(pid: int):
+        c = conn()
+        g_ = scheduler.gate(c)
+        if not g_["can_add"]:
+            return jsonify({"error": "在途已满，先归档或移出一题"}), 409
+        c.execute("UPDATE problem SET phase='active' WHERE id=?", (pid,))
+        c.commit()
+        return jsonify({"ok": True})
+
+    @app.post("/api/problems/<int:pid>/deactivate")
+    def api_problem_deactivate(pid: int):
+        """手动移回候补（排到队尾），空出的名额由队头补上。"""
+        c = conn()
+        nxt = c.execute(
+            "SELECT COALESCE(MAX(order_no), 0) + 1 m FROM problem WHERE phase='queued'"
+        ).fetchone()["m"]
+        c.execute("UPDATE problem SET phase='queued', order_no=? WHERE id=?", (nxt, pid))
+        c.commit()
+        others = c.execute(
+            "SELECT COUNT(*) c FROM problem WHERE phase='queued' AND id<>?", (pid,)
+        ).fetchone()["c"]
+        if others == 0:
+            return jsonify({"ok": True, "refilled": 0,
+                            "note": "候补队列是空的，这个名额先空着"})
+        return jsonify({"ok": True, "refilled": scheduler.refill(c)})
+
     @app.delete("/api/problems/<int:pid>")
     def api_problem_delete(pid: int):
         c = conn()
         c.execute("DELETE FROM problem WHERE id=?", (pid,))
         c.commit()
+        scheduler.refill(c)
         return jsonify({"ok": True})
 
     @app.post("/api/problems")
@@ -385,22 +442,20 @@ def create_app(root: Path | None = None) -> Flask:
                 return jsonify({"error": "此题已录用", "code": "DUPLICATE"}), 409
 
         g_ = scheduler.gate(c)
-        if not g_["can_add_problem"]:
-            return jsonify({"error": f"在途已满（{g_['active']}/{g_['active_limit']}）",
-                            "code": "GATE_FULL", "gate": g_}), 409
-
+        phase = "active" if g_["can_add"] else "queued"
         url = b.get("url") or (f"https://leetcode.cn/problems/{b['slug']}/" if b.get("slug") else "")
         solved = 1 if b.get("solved") else 0
         cur = c.execute(
-            "INSERT INTO problem(leetcode_id,slug,title,difficulty,url,tags,status,solved,solved_at) "
-            "VALUES(?,?,?,?,?,?,'inbox',?,?)",
+            "INSERT INTO problem(leetcode_id,slug,title,difficulty,url,tags,status,phase,solved,solved_at) "
+            "VALUES(?,?,?,?,?,?,'inbox',?,?,?)",
             (lid, b.get("slug", ""), title, b.get("difficulty", ""), url, b.get("tags", ""),
-             solved, scheduler.today_str() if solved else None),
+             phase, solved, scheduler.today_str() if solved else None),
         )
         pid = cur.lastrowid
-        _place_in_slot(c, pid, b.get("slot"))
+        if phase == "active":
+            _place_in_slot(c, pid, b.get("slot"))
         c.commit()
-        return jsonify({"id": pid})
+        return jsonify({"id": pid, "queued": phase == "queued"})
 
     @app.put("/api/problems/<int:pid>")
     def api_problem_update(pid: int):
@@ -436,16 +491,14 @@ def create_app(root: Path | None = None) -> Flask:
                             "problem_id": row["id"]}), 409
 
         g_ = scheduler.gate(c)
-        if not g_["can_add_problem"]:
-            return jsonify({"error": f"在途已满（{g_['active']}/{g_['active_limit']}）",
-                            "code": "GATE_FULL", "gate": g_}), 409
+        phase = "active" if g_["can_add"] else "queued"   # 在途满了就排队，不拒收
 
         solved = 1 if b.get("solved") else 0
         cur = c.execute(
-            "INSERT INTO problem(leetcode_id,slug,title,difficulty,url,tags,status,solved,solved_at) "
-            "VALUES(?,?,?,?,?,?,'inbox',?,?)",
+            "INSERT INTO problem(leetcode_id,slug,title,difficulty,url,tags,status,phase,solved,solved_at) "
+            "VALUES(?,?,?,?,?,?,'inbox',?,?,?)",
             (lid, b.get("slug", ""), title, b.get("difficulty", ""), b.get("url", ""),
-             b.get("tags", ""), solved, scheduler.today_str() if solved else None),
+             b.get("tags", ""), phase, solved, scheduler.today_str() if solved else None),
         )
         pid = cur.lastrowid
         created = True
@@ -468,10 +521,11 @@ def create_app(root: Path | None = None) -> Flask:
             )
             c.execute("UPDATE problem SET status='linked' WHERE id=?", (pid,))
 
-        _place_in_slot(c, pid, b.get("slot"))
+        if phase == "active":
+            _place_in_slot(c, pid, b.get("slot"))
         c.commit()
         return jsonify({"problem_id": pid, "created": created, "card_id": card_id,
-                        "duplicate": not created})
+                        "duplicate": not created, "queued": phase == "queued"})
 
     @app.post("/api/problems/<int:pid>/link")
     def api_problem_link(pid: int):

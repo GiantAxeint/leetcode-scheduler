@@ -82,20 +82,49 @@ function renderGate(g, backlog) {
   const warn = (a, b) => (a >= b ? 'warn' : '');
   $('#gate').innerHTML = `
     <span class="chip ${warn(g.active, g.active_limit)}" onclick="openList('inflight')"
-          title="当月要复习的不同题目，同一题多次复习算 1">在途 ${g.active}/${g.active_limit}</span>
+          title="正在复习的不同题目，同一题多次复习算 1">在途 ${g.active}/${g.active_limit}</span>
+    <span class="chip" onclick="openList('queued')" title="还没轮到的题，出池一个补一个">候补 ${g.queued}</span>
     <span class="chip" onclick="openList('inbox')" title="还没归到题型上的题">待归纳 ${g.inbox}</span>
     <span class="chip ${backlog > 0 ? 'warn' : ''}" onclick="openList('backlog')"
           title="今天到期但没排进当日任务">积压 ${backlog}</span>`;
 }
 
-/* 点状态条看题目清单 */
+/* 点状态条看清单 */
 async function openList(kind) {
   const meta = {
-    inflight: { title: '在途 · 当月要复习的题', url: '/inflight' },
+    inflight: { title: '在途 · 正在复习的题', url: '/inflight' },
+    queued: { title: '候补队列 · 拖拽调整顺序', url: '/queued' },
     inbox: { title: '待归纳题型区', url: '/problems?status=inbox' },
     backlog: { title: '积压 · 今天没排下的', url: '/backlog' },
   }[kind];
   const rows = await api(meta.url);
+
+  if (kind === 'queued') {
+    const items = rows.map((r, i) => `
+      <div class="qrow" draggable="true" data-id="${r.id}">
+        <span class="qidx">${i + 1}</span>
+        <span class="qmain">
+          <b style="font-weight:500">${titleLink(r.title, r)}</b>
+          <span class="muted">${esc([
+            r.leetcode_id ? '#' + r.leetcode_id : '',
+            r.difficulty || '',
+            r.status === 'inbox' ? '未归题型' : (r.cards || '已归题型'),
+          ].filter(Boolean).join(' · '))}</span>
+        </span>
+        <button class="btn ghost" onclick="activateProblem(${r.id})">提到在途</button>
+        <button class="btn ghost" onclick="delProblem(${r.id});closeModal()">删除</button>
+      </div>`).join('');
+    modal(`<h2 style="margin:0 0 6px;font-size:17px;font-weight:500">${meta.title}</h2>
+      <div class="cap">按住任意一行拖动即可排序，松手后点保存。在途出池一个，队头自动补一个。</div>
+      <div id="qlist">${items || '<div class="muted" style="padding:14px 4px">候补队列是空的</div>'}</div>
+      <div class="row end" style="margin-top:16px">
+        <button class="btn" onclick="closeModal()">关闭</button>
+        <button class="btn primary" onclick="saveQueueOrder()">保存顺序</button>
+      </div>`);
+    bindQueueDrag();
+    return;
+  }
+
   const body = rows.length
     ? rows.map((r) => {
       const name = r.title || r.problem_title || '';
@@ -109,7 +138,10 @@ async function openList(kind) {
       const label = kind === 'backlog' ? esc(name) : titleLink(name, r);
       return `<div class="recent-row">
         <span><b style="font-weight:500">${label}</b><br><span class="muted">${esc(sub)}</span></span>
-        ${pid ? `<button class="btn ghost" onclick="removeProblem(${pid},'${kind}')">删除</button>`
+        ${pid ? `<span class="row" style="gap:4px">
+            ${kind === 'inflight' ? `<button class="btn ghost" onclick="deactivateProblem(${pid},'inflight')">移回候补</button>` : ''}
+            <button class="btn ghost" onclick="removeProblem(${pid},'${kind}')">删除</button>
+          </span>`
           : `<button class="btn ghost" onclick="removeCard(${cid},'${kind}')">归档</button>`}
       </div>`;
     }).join('')
@@ -121,6 +153,55 @@ async function openList(kind) {
       ${kind === 'inflight' ? '<button class="btn" onclick="gotoAdd()">添加题目</button>' : ''}
       <button class="btn" onclick="closeModal()">关闭</button>
     </div>`);
+}
+
+function bindQueueDrag() {
+  const box = $('#qlist');
+  if (!box) return;
+  let dragged = null;
+  box.querySelectorAll('.qrow').forEach((row) => {
+    row.addEventListener('dragstart', () => {
+      dragged = row;
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      dragged = null;
+    });
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (!dragged || dragged === row) return;
+      const rect = row.getBoundingClientRect();
+      const after = e.clientY > rect.top + rect.height / 2;
+      box.insertBefore(dragged, after ? row.nextSibling : row);
+    });
+  });
+}
+
+async function saveQueueOrder() {
+  const ids = [...document.querySelectorAll('#qlist .qrow')].map((r) => Number(r.dataset.id));
+  await api('/queued/order', { method: 'PUT', body: { ids } });
+  toast('顺序已保存');
+  refreshGate();
+}
+
+async function activateProblem(id) {
+  try {
+    await api(`/problems/${id}/activate`, { method: 'POST', silent: true });
+  } catch (e) {
+    toast(`提到在途失败，${e.message}`);
+    return;
+  }
+  toast('已提到在途');
+  refreshGate();
+  openList('queued');
+}
+
+async function deactivateProblem(id, kind) {
+  await api(`/problems/${id}/deactivate`, { method: 'POST' });
+  toast('已移回候补，队头补位');
+  refreshGate();
+  openList(kind);
 }
 
 function gotoAdd() {
@@ -422,11 +503,13 @@ async function loadProblems() {
     <td>${titleLink(p.title, p)}</td>
     <td><button class="btn ghost" onclick="openCardEditor(null,${p.id})">归题型</button></td>
     <td><button class="btn ghost" onclick="delProblem(${p.id})">删除</button></td></tr>`).join('');
+  const PHASE = { active: '在途', queued: '候补', done: '完成' };
   const allRows = all.slice(0, 100).map((p) => `
     <tr><td>${p.leetcode_id || ''}</td>
     <td>${titleLink(p.title, p)}</td>
     <td>${esc(p.difficulty || '')}</td>
-    <td>${p.status === 'linked' ? '已挂题型' : '待归纳'}</td>
+    <td>${p.status === 'linked' ? '已归题型' : '待归纳'}</td>
+    <td><span class="badge ${p.phase === 'active' ? 'due' : ''}">${PHASE[p.phase] || '候补'}</span></td>
     <td><button class="btn ghost" onclick="delProblem(${p.id})">删除</button></td></tr>`).join('');
   $('#view-problems').innerHTML = `
     <div class="panel" style="margin-bottom:16px">
@@ -457,8 +540,8 @@ async function loadProblems() {
     </div>
     <div class="panel">
       <h3>全部题目</h3><div class="cap">最近 100 条</div>
-      <table><thead><tr><th>题号</th><th>标题</th><th>难度</th><th>状态</th><th></th></tr></thead>
-      <tbody>${allRows || '<tr><td colspan="5" class="muted">还没有题</td></tr>'}</tbody></table>
+      <table><thead><tr><th>题号</th><th>标题</th><th>难度</th><th>归纳</th><th>阶段</th><th></th></tr></thead>
+      <tbody>${allRows || '<tr><td colspan="6" class="muted">还没有题</td></tr>'}</tbody></table>
     </div>`;
   $('#p-slot').value = autoSlot();
 }
@@ -472,13 +555,15 @@ async function addProblem() {
     slot: $('#p-slot').value,
   };
   if (!body.leetcode_id && !body.title) { toast('题号或标题至少给一个'); return; }
+  let r;
   try {
-    await api('/problems', { method: 'POST', body, silent: true });
+    r = await api('/problems', { method: 'POST', body, silent: true });
   } catch (e) {
     toast(`录用失败，${e.message}`);
     return;
   }
-  toast(body.slot ? '录用成功，已排进' + SLOT_LABEL[body.slot] : '录用成功，已进待归纳区');
+  if (r.queued) toast('已录用，在途已满，排进候补');
+  else toast(body.slot ? '录用成功，已排进' + SLOT_LABEL[body.slot] : '录用成功，已进在途');
   loadProblems();
   refreshGate();
   if (CURRENT_VIEW === 'today') loadToday();
