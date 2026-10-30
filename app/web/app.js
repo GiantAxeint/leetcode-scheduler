@@ -21,12 +21,22 @@ function lcUrl(o) {
   return '';
 }
 
+/* LeetCode 官方难度色：简单 #00B8A3 / 中等 #FFB800 / 困难 #FF375F */
+function diffClass(d) {
+  const s = String(d || '');
+  if (/简单|easy/i.test(s)) return 'd-easy';
+  if (/中等|medium/i.test(s)) return 'd-medium';
+  if (/困难|hard/i.test(s)) return 'd-hard';
+  return '';
+}
+
 function titleLink(text, o) {
   const u = lcUrl(o);
+  const cls = ('plink ' + diffClass(o && (o.difficulty || o.problem_difficulty))).trim();
   const t = esc(text);
   return u
-    ? `<a class="plink" href="${esc(u)}" target="_blank" rel="noopener">${t}</a>`
-    : t;
+    ? `<a class="${cls}" href="${esc(u)}" target="_blank" rel="noopener">${t}</a>`
+    : `<span class="${cls} plain">${t}</span>`;
 }
 
 async function api(path, opts = {}) {
@@ -272,6 +282,7 @@ function problemItem(r) {
   return `<div class="item ${r.done ? 'done' : ''}">
     <div class="t">${titleLink(r.problem_title, {
       url: r.problem_url, slug: r.problem_slug, leetcode_id: r.leetcode_id,
+      difficulty: r.problem_difficulty,
     })}<span class="badge new">新题</span></div>
     <div class="m">${r.leetcode_id ? 'LeetCode ' + r.leetcode_id : '未绑定题号'}</div>
     <div class="row" style="margin-top:8px">
@@ -507,7 +518,9 @@ async function loadProblems() {
   const allRows = all.slice(0, 100).map((p) => `
     <tr><td>${p.leetcode_id || ''}</td>
     <td>${titleLink(p.title, p)}</td>
-    <td>${esc(p.difficulty || '')}</td>
+    <td>${p.difficulty
+      ? `<span class="dif ${diffClass(p.difficulty).replace('d-', '')}">${esc(p.difficulty)}</span>`
+      : ''}</td>
     <td>${p.status === 'linked' ? '已归题型' : '待归纳'}</td>
     <td><span class="badge ${p.phase === 'active' ? 'due' : ''}">${PHASE[p.phase] || '候补'}</span></td>
     <td><button class="btn ghost" onclick="delProblem(${p.id})">删除</button></td></tr>`).join('');

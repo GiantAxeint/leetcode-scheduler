@@ -100,7 +100,8 @@ def create_app(root: Path | None = None) -> Flask:
             SELECT p.id AS plan_id, p.slot, p.done, p.card_id, p.problem_id,
                    c.title, c.category, c.trigger_signals,
                    s.stage, s.next_due,
-                   pr.title AS problem_title, pr.leetcode_id, pr.url AS problem_url, pr.slug AS problem_slug
+                   pr.title AS problem_title, pr.leetcode_id, pr.url AS problem_url,
+                   pr.slug AS problem_slug, pr.difficulty AS problem_difficulty
             FROM daily_plan p
             LEFT JOIN pattern_card c ON c.id = p.card_id
             LEFT JOIN card_state  s ON s.card_id = p.card_id
