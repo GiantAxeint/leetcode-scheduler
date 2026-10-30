@@ -163,3 +163,16 @@ def test_backlog_counts_unplanned_due(conn):
     db.set_setting(conn, "morning_new", 0)
     scheduler.build_plan(conn)
     assert scheduler.backlog(conn) == 3
+
+
+def test_add_days_skips_weekend():
+    # 2026-10-30 是周五
+    assert scheduler.add_days(1, "2026-10-30") == "2026-11-02"   # 周六 → 周一
+    assert scheduler.add_days(3, "2026-10-30") == "2026-11-02"
+    assert scheduler.add_days(7, "2026-10-30") == "2026-11-06"
+
+
+def test_build_plan_skips_weekend(conn):
+    _add_problem(conn, "周末题", stage=2, next_due="2026-10-31")
+    scheduler.build_plan(conn, "2026-10-31")      # 周六
+    assert conn.execute("SELECT COUNT(*) c FROM daily_plan").fetchone()["c"] == 0

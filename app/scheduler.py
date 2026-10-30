@@ -14,9 +14,25 @@ def today_str() -> str:
     return date.today().isoformat()
 
 
+def due_date() -> str:
+    """新题该从哪天开始：周末录的题算下周一。"""
+    return next_workday(date.today()).isoformat()
+
+
+def is_workday(d: date) -> bool:
+    return d.weekday() < 5          # 0=周一 … 4=周五
+
+
+def next_workday(d: date) -> date:
+    while not is_workday(d):
+        d += timedelta(days=1)
+    return d
+
+
 def add_days(n: int, base: str | None = None) -> str:
+    """往后推 n 天，落到周六周日就顺延到下一个工作日。"""
     d = date.fromisoformat(base) if base else date.today()
-    return (d + timedelta(days=n)).isoformat()
+    return next_workday(d + timedelta(days=n)).isoformat()
 
 
 def advance(stage: int, correct: bool, lapse: float = 0.5) -> tuple[int, str | None, bool]:
@@ -103,7 +119,7 @@ def refill(conn: sqlite3.Connection) -> int:
     for r in rows:
         conn.execute(
             "UPDATE problem SET phase='active', next_due=? WHERE id=?",
-            (today_str(), r["id"]),
+            (due_date(), r["id"]),
         )
     if rows:
         conn.commit()
@@ -133,8 +149,10 @@ def gate(conn: sqlite3.Connection) -> dict:
 
 
 def build_plan(conn: sqlite3.Connection, today: str | None = None) -> None:
-    """当天计划只生成一次。早班新题、午班到期、晚班剩余到期。"""
+    """当天计划只生成一次。周末不排班。"""
     today = today or today_str()
+    if not is_workday(date.fromisoformat(today)):
+        return
     if conn.execute(
         "SELECT 1 FROM daily_plan WHERE plan_date=? LIMIT 1", (today,)
     ).fetchone():

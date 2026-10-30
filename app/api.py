@@ -116,6 +116,7 @@ def create_app(root: Path | None = None) -> Flask:
         return jsonify(
             {
                 "date": today,
+                "rest": not scheduler.is_workday(date.today()),
                 "gate": scheduler.gate(c),
                 "backlog": scheduler.backlog(c, today),
                 "slots": slots,
@@ -454,10 +455,10 @@ def create_app(root: Path | None = None) -> Flask:
         url = b.get("url") or (f"https://leetcode.cn/problems/{b['slug']}/" if b.get("slug") else "")
         solved = 1 if b.get("solved") else 0
         cur = c.execute(
-            "INSERT INTO problem(leetcode_id,slug,title,difficulty,url,tags,status,phase,solved,solved_at) "
-            "VALUES(?,?,?,?,?,?,'inbox',?,?,?)",
+            "INSERT INTO problem(leetcode_id,slug,title,difficulty,url,tags,status,phase,"
+            "next_due,solved,solved_at) VALUES(?,?,?,?,?,?,'inbox',?,?,?,?)",
             (lid, b.get("slug", ""), title, b.get("difficulty", ""), url, b.get("tags", ""),
-             phase, solved, scheduler.today_str() if solved else None),
+             phase, scheduler.due_date(), solved, scheduler.today_str() if solved else None),
         )
         pid = cur.lastrowid
         if phase == "active":
@@ -503,10 +504,11 @@ def create_app(root: Path | None = None) -> Flask:
 
         solved = 1 if b.get("solved") else 0
         cur = c.execute(
-            "INSERT INTO problem(leetcode_id,slug,title,difficulty,url,tags,status,phase,solved,solved_at) "
-            "VALUES(?,?,?,?,?,?,'inbox',?,?,?)",
+            "INSERT INTO problem(leetcode_id,slug,title,difficulty,url,tags,status,phase,"
+            "next_due,solved,solved_at) VALUES(?,?,?,?,?,?,'inbox',?,?,?,?)",
             (lid, b.get("slug", ""), title, b.get("difficulty", ""), b.get("url", ""),
-             b.get("tags", ""), phase, solved, scheduler.today_str() if solved else None),
+             b.get("tags", ""), phase, scheduler.due_date(), solved,
+             scheduler.today_str() if solved else None),
         )
         pid = cur.lastrowid
         created = True
@@ -757,6 +759,8 @@ def _place_in_slot(c: sqlite3.Connection, problem_id: int, slot: str | None) -> 
     """给了班次就直接排进今天的那个班；没给就留在待归卡区等下一次排班。"""
     if slot not in SLOTS or not problem_id:
         return
+    if not scheduler.is_workday(date.today()):
+        return                      # 周末不排班，等周一
     today = scheduler.today_str()
     exists = c.execute(
         "SELECT 1 FROM daily_plan WHERE plan_date=? AND problem_id=?", (today, problem_id)

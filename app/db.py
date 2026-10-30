@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import config
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 DEFAULT_SETTINGS = {
     "queue_limit": "15",          # 在途：当月要复习的不同题目上限（同一题多次复习算 1）
@@ -176,6 +176,23 @@ def migrate(conn: sqlite3.Connection) -> None:
             "WHERE problem_id IS NOT NULL AND problem_id IN "
             "(SELECT id FROM problem WHERE stage=0)"
         )
+    if version < 7:
+        # 复习只排周一到周五，落在周末的到期日顺延到下一个工作日
+        from datetime import date as _date, timedelta as _td
+
+        def _next_workday(d):
+            while d.weekday() >= 5:
+                d += _td(days=1)
+            return d.isoformat()
+
+        for r in conn.execute(
+            "SELECT id, next_due FROM problem WHERE next_due IS NOT NULL"
+        ).fetchall():
+            d = _date.fromisoformat(r["next_due"])
+            if d.weekday() >= 5:
+                conn.execute(
+                    "UPDATE problem SET next_due=? WHERE id=?", (_next_workday(d), r["id"])
+                )
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 

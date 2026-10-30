@@ -242,6 +242,18 @@ async function removeCard(cid, kind) {
 async function loadToday() {
   TODAY = await api('/today');
   renderGate(TODAY.gate, TODAY.backlog);
+  if (TODAY.rest) {
+    $('#view-today').innerHTML = `
+      <div class="panel" style="text-align:center;padding:64px 24px">
+        <h2 style="margin:0 0 10px;font-size:18px;font-weight:500">周末休息</h2>
+        <div class="muted" style="margin-bottom:18px">
+          复习只排在周一到周五。到期日落在周末的题，已经顺延到下周一。
+        </div>
+        <button class="btn" onclick="loadToday()">刷新</button>
+        <button class="btn ghost" onclick="CURRENT_VIEW='problems';location.hash='problems';render()">去看看题库</button>
+      </div>`;
+    return;
+  }
   const labels = { morning: '早班', noon: '午班', evening: '晚班' };
   const caps = {
     morning: '今天新录的题，先自己做',
@@ -553,7 +565,7 @@ async function loadProblems() {
     <td><button class="btn ghost" onclick="delProblem(${p.id})">删除</button></td></tr>`).join('');
   $('#view-problems').innerHTML = `
     <div class="panel" style="margin-bottom:16px">
-      <h3>录入一道题</h3><div class="cap">题号、标题、难度 + 排到哪个班，一次说完</div>
+      <h3>录入一道题</h3><div class="cap">题号、标题、难度 + 排到哪个班，一次说完。周末录的题顺延到周一。</div>
       <div class="grid2">
         <label class="field"><span>LeetCode 题号</span><input id="p-id" placeholder="1"></label>
         <label class="field"><span>标题</span><input id="p-title" placeholder="Two Sum"></label>
