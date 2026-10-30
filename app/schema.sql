@@ -90,7 +90,6 @@ CREATE TABLE IF NOT EXISTS review_log (
     note        TEXT NOT NULL DEFAULT ''
 );
 
-CREATE INDEX IF NOT EXISTS idx_review_problem ON review_log(problem_id, reviewed_at);
 CREATE INDEX IF NOT EXISTS idx_review_card ON review_log(card_id, reviewed_at);
 
 CREATE TABLE IF NOT EXISTS daily_plan (

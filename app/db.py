@@ -61,6 +61,12 @@ def init(conn: sqlite3.Connection) -> None:
             [(n, h, i) for i, (n, h) in enumerate(DEFAULT_CHECKS)],
         )
     migrate(conn)
+    # 依赖新列的索引放在迁移之后建，否则老库会在 executescript 阶段就炸
+    if "problem_id" in {r["name"] for r in conn.execute("PRAGMA table_info(review_log)")}:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_review_problem "
+            "ON review_log(problem_id, reviewed_at)"
+        )
     conn.commit()
 
 
