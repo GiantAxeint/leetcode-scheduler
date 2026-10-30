@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>刷题调度</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">刷题调度</div>
+  <div class="gate" id="gate"></div>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-view="today">今日</button>
+    <button class="tab" data-view="cards">题型卡</button>
+    <button class="tab" data-view="problems">题目</button>
+    <button class="tab" data-view="stats">统计</button>
+    <button class="tab" data-view="settings">设置</button>
+  </nav>
+</header>
+
+<main>
+  <section id="view-today" class="view active"></section>
+  <section id="view-cards" class="view"></section>
+  <section id="view-problems" class="view"></section>
+  <section id="view-stats" class="view"></section>
+  <section id="view-settings" class="view"></section>
+</main>
+
+<div id="modal" class="modal hidden"><div class="modal-box" id="modal-box"></div></div>
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
