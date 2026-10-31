@@ -324,6 +324,12 @@ pre.code {
 .ditem .dt { font-weight: 500; font-size: 13px; margin-bottom: 4px; }
 .ditem .dm { font-size: 12px; color: var(--hint); }
 
+/* 把班次里的卡拖回来：整个抽屉变成「移出今日」的落点 */
+.drawer.drop-back {
+  border-color: var(--blue);
+  box-shadow: inset 0 0 0 1px var(--blue);
+}
+
 /* 白底小字要看得清，LeetCode 原色对 13px 偏浅 */
 .plink.d-easy, .plain.d-easy { color: #008f7e; border-bottom-color: #9ee3d8; }
 .plink.d-easy:hover { color: #00705f; border-bottom-color: #00705f; }

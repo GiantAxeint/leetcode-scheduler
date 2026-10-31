@@ -376,6 +376,21 @@ def create_app(root: Path | None = None) -> Flask:
             }
         )
 
+    @app.delete("/api/plan/<int:plan_id>")
+    def api_plan_remove(plan_id: int):
+        """把题从今天的清单里移出（拖回题库抽屉）。
+
+        只删 daily_plan 这一行：phase、stage、next_due 全都不动，
+        题还在原来的在途/候补里，随时能再拖回来。
+        """
+        c = conn()
+        row = c.execute("SELECT * FROM daily_plan WHERE id=?", (plan_id,)).fetchone()
+        if not row:
+            return jsonify({"error": "今天没有这一条"}), 404
+        c.execute("DELETE FROM daily_plan WHERE id=?", (plan_id,))
+        c.commit()
+        return jsonify({"ok": True, "problem_id": row["problem_id"]})
+
     @app.post("/api/plan/<int:plan_id>/done")
     def api_plan_done(plan_id: int):
         c = conn()

@@ -323,7 +323,7 @@ function drawerHtml() {
     <div class="drawer-head">
       ${tabs}
       <div class="spacer"></div>
-      <span class="muted" style="font-size:12px">拖到上面任意班次即可加入</span>
+      <span class="muted" style="font-size:12px">拖到上面任意班次即加入 · 班次里的卡拖回这里即移出</span>
       <button class="btn ghost" onclick="toggleDrawer()">${DRAWER_OPEN ? '收起' : '题库'}</button>
     </div>
     ${DRAWER_OPEN ? `<div class="drawer-body">${body}</div>` : ''}
@@ -442,6 +442,35 @@ function bindPlanDrag() {
       loadToday();
     });
   });
+
+  // 拖回抽屉 = 从今天的清单里移出（拖错了的撤回通道）
+  const drawer = $('.drawer');
+  if (drawer) {
+    drawer.addEventListener('dragover', (e) => {
+      if (!DRAG_PLAN) return;   // 只有班次里的卡能拖回；抽屉里的卡拖抽屉没有意义
+      e.preventDefault();
+      drawer.classList.add('drop-back');
+    });
+    drawer.addEventListener('dragleave', (e) => {
+      if (!drawer.contains(e.relatedTarget)) drawer.classList.remove('drop-back');
+    });
+    drawer.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      drawer.classList.remove('drop-back');
+      const raw = e.dataTransfer.getData('text/plain') || '';
+      const planId = DRAG_PLAN || (raw.startsWith('plan:') ? raw.slice(5) : null);
+      if (!planId) return;
+      try {
+        await api(`/plan/${planId}`, { method: 'DELETE', silent: true });
+      } catch (err) {
+        toast(err.message);
+        return;
+      }
+      toast('已移出今日，回到题库');
+      await loadToday();
+      if (DRAWER_OPEN) await loadDrawer();
+    });
+  }
 }
 
 function planItem(r) {
