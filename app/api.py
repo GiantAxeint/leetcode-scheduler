@@ -33,6 +33,10 @@ def create_app(root: Path | None = None) -> Flask:
         resp.headers["Access-Control-Allow-Origin"] = "*"
         resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
         resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,OPTIONS"
+        # WebView2 会按 Last-Modified 做启发式缓存，改完前端重启还是老界面。
+        # 前端是本地文件、体积也小，直接禁缓存最省事。
+        if request.path.endswith((".js", ".css", ".html")):
+            resp.headers["Cache-Control"] = "no-store, must-revalidate"
         return resp
 
     def conn() -> sqlite3.Connection:
