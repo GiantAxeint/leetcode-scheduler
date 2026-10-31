@@ -242,6 +242,11 @@ async function removeCard(cid, kind) {
 async function loadToday() {
   TODAY = await api('/today');
   renderGate(TODAY.gate, TODAY.backlog);
+  renderToday();
+}
+
+/* 单独拆出来：抽屉切换 tab 时只要重画，不必再请求一次 /today */
+function renderToday() {
   const labels = { morning: '早班', noon: '午班', evening: '晚班' };
   const caps = {
     morning: '今天新录的题，先自己做',
@@ -273,31 +278,135 @@ async function loadToday() {
       <button class="btn" onclick="loadToday()">刷新</button>
       <button class="btn ghost" onclick="gotoAdd()">加题</button>
       <span class="muted">卡片可以直接拖到别的班次</span>
-    </div>`;
+    </div>
+    ${drawerHtml()}`;
   bindPlanDrag();
+}
+
+/* ---------------- 题库抽屉 ----------------
+   为什么不做成弹窗：弹窗有遮罩层，拖拽事件到不了外面的 dropzone，
+   HTML5 拖放跨不过去。要能拖，清单就必须长在页面上。 */
+const DRAWER_TABS = [
+  ['inflight', '在途'],
+  ['queued', '候补'],
+  ['inbox', '待归纳'],
+  ['backlog', '积压'],
+];
+const DRAWER_URL = {
+  inflight: '/inflight',
+  queued: '/queued',
+  inbox: '/problems?status=inbox',
+  backlog: '/backlog',
+};
+let DRAWER_OPEN = false;
+let DRAWER_TAB = 'inflight';
+let DRAWER_ITEMS = [];
+let DRAWER_LOADING = false;
+
+function drawerHtml() {
+  const tabs = DRAWER_TABS.map(([k, t]) =>
+    `<button class="dtab${DRAWER_TAB === k ? ' on' : ''}" onclick="pickDrawer('${k}')">${t}</button>`
+  ).join('');
+
+  let body = '';
+  if (DRAWER_OPEN) {
+    if (DRAWER_LOADING) {
+      body = '<div class="muted" style="padding:12px 2px">加载中…</div>';
+    } else if (!DRAWER_ITEMS.length) {
+      body = '<div class="muted" style="padding:12px 2px">这一类是空的</div>';
+    } else {
+      body = DRAWER_ITEMS.map(drawerCard).join('');
+    }
+  }
+
+  return `<div class="drawer">
+    <div class="drawer-head">
+      ${tabs}
+      <div class="spacer"></div>
+      <span class="muted" style="font-size:12px">拖到上面任意班次即可加入</span>
+      <button class="btn ghost" onclick="toggleDrawer()">${DRAWER_OPEN ? '收起' : '题库'}</button>
+    </div>
+    ${DRAWER_OPEN ? `<div class="drawer-body">${body}</div>` : ''}
+  </div>`;
+}
+
+function drawerCard(p) {
+  const pid = p.id || p.problem_id;
+  const sub = [
+    p.leetcode_id ? 'LeetCode ' + p.leetcode_id : '',
+    p.difficulty || '',
+    p.next_due ? '到期 ' + p.next_due : '',
+  ].filter(Boolean).join(' · ');
+  return `<div class="ditem" draggable="true" data-problem="${pid}">
+    <div class="dt">${titleLink(p.title || p.problem_title || '', p)}</div>
+    <div class="dm">${esc(sub)}</div>
+  </div>`;
+}
+
+async function loadDrawer() {
+  DRAWER_LOADING = true;
+  renderToday();
+  try {
+    DRAWER_ITEMS = (await api(DRAWER_URL[DRAWER_TAB])) || [];
+  } catch (e) {
+    DRAWER_ITEMS = [];
+  }
+  DRAWER_LOADING = false;
+  renderToday();
+}
+
+async function toggleDrawer() {
+  DRAWER_OPEN = !DRAWER_OPEN;
+  if (DRAWER_OPEN) await loadDrawer();
+  else renderToday();
+}
+
+async function pickDrawer(kind) {
+  DRAWER_TAB = kind;
+  DRAWER_OPEN = true;
+  await loadDrawer();
 }
 
 /* 三个班次之间拖拽 */
 let DRAG_PLAN = null;
+let DRAG_PROBLEM = null;
 
 function bindPlanDrag() {
+  const clearHover = () => $$('.dropzone').forEach((b) => b.classList.remove('drop-hover'));
+
+  // 班次之间换班：拖的是已有的计划项
   $$('.item[data-plan]').forEach((el) => {
     el.addEventListener('dragstart', (e) => {
       DRAG_PLAN = el.dataset.plan;
       el.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', DRAG_PLAN);
+      e.dataTransfer.setData('text/plain', 'plan:' + DRAG_PLAN);
     });
     el.addEventListener('dragend', () => {
       el.classList.remove('dragging');
       DRAG_PLAN = null;
-      $$('.dropzone').forEach((b) => b.classList.remove('drop-hover'));
+      clearHover();
+    });
+  });
+
+  // 题库抽屉里的题：拖进来就是「加进这一班」
+  $$('.ditem[data-problem]').forEach((el) => {
+    el.addEventListener('dragstart', (e) => {
+      DRAG_PROBLEM = el.dataset.problem;
+      el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', 'problem:' + DRAG_PROBLEM);
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+      DRAG_PROBLEM = null;
+      clearHover();
     });
   });
 
   $$('.dropzone').forEach((box) => {
     box.addEventListener('dragover', (e) => {
-      if (!DRAG_PLAN) return;
+      if (!DRAG_PLAN && !DRAG_PROBLEM) return;
       e.preventDefault();
       box.classList.add('drop-hover');
     });
@@ -307,16 +416,29 @@ function bindPlanDrag() {
     box.addEventListener('drop', async (e) => {
       e.preventDefault();
       box.classList.remove('drop-hover');
-      const id = DRAG_PLAN || e.dataTransfer.getData('text/plain');
+      const raw = e.dataTransfer.getData('text/plain') || '';
       const slot = box.dataset.slot;
-      if (!id || !slot) return;
+      if (!slot) return;
+      const planId = DRAG_PLAN || (raw.startsWith('plan:') ? raw.slice(5) : null);
+      const problemId = DRAG_PROBLEM || (raw.startsWith('problem:') ? raw.slice(8) : null);
       try {
-        await api(`/plan/${id}`, { method: 'PUT', body: { slot }, silent: true });
+        if (planId) {
+          await api(`/plan/${planId}`, { method: 'PUT', body: { slot }, silent: true });
+          toast('已移到' + SLOT_LABEL[slot]);
+        } else if (problemId) {
+          const r = await api('/plan/add', {
+            method: 'POST',
+            body: { problem_id: Number(problemId), slot },
+            silent: true,
+          });
+          toast(r.moved ? '已改到' + SLOT_LABEL[slot] : '已加入' + SLOT_LABEL[slot]);
+        } else {
+          return;
+        }
       } catch (err) {
         toast(err.message);
         return;
       }
-      toast('已移到' + SLOT_LABEL[slot]);
       loadToday();
     });
   });

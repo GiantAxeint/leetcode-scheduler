@@ -201,8 +201,17 @@ def create_app(root: Path | None = None) -> Flask:
 
         correct = bool(b.get("correct"))
         stage_from = p["stage"] or 0
-        lapse = db.get_float(c, "lapse_factor", 0.5)
-        stage_to, next_due, out_pool = scheduler.advance(stage_from, correct, lapse)
+        today = scheduler.today_str()
+        # 提前复习（还没到期就自己加练）：规则跟到期复习不一样，
+        # 由后端按 next_due 自动识别，前端不用传标志
+        early = bool(p["next_due"]) and p["next_due"] > today
+        if early:
+            stage_to, next_due, out_pool = scheduler.advance_early(
+                stage_from, correct, p["next_due"]
+            )
+        else:
+            lapse = db.get_float(c, "lapse_factor", 0.5)
+            stage_to, next_due, out_pool = scheduler.advance(stage_from, correct, lapse)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         c.execute(
@@ -388,18 +397,38 @@ def create_app(root: Path | None = None) -> Flask:
 
     @app.post("/api/plan/add")
     def api_plan_add():
-        """把一道已录入的题手动补进今天某个班次。"""
+        """把一道题手动补进今天某个班次（题库抽屉拖拽走这里）。
+
+        候补 / 待归纳 / 积压的题都收：拖进来只是进当日清单，
+        不改 phase、不占在途名额。已经在今天的重复拖入按「换班」处理。
+        """
         c = conn()
         b = request.get_json(force=True) or {}
         pid = int(b.get("problem_id") or 0)
         if not pid:
             return jsonify({"error": "缺 problem_id"}), 400
-        row = c.execute("SELECT phase FROM problem WHERE id=?", (pid,)).fetchone()
-        if row and row["phase"] != "active":
-            return jsonify({"error": "这题还在候补队列里，先提到在途"}), 409
-        placed = _place_in_slot(c, pid, b.get("slot"))
+        if not c.execute("SELECT 1 FROM problem WHERE id=?", (pid,)).fetchone():
+            return jsonify({"error": "题目不存在"}), 404
+
+        slot = b.get("slot")
+        if slot == "auto":
+            slot = _auto_slot()
+        today = scheduler.today_str()
+        row = c.execute(
+            "SELECT id FROM daily_plan WHERE plan_date=? AND problem_id=?", (today, pid)
+        ).fetchone()
+        if row:
+            if slot in SLOTS:
+                c.execute(
+                    "UPDATE daily_plan SET slot=? WHERE id=?", (slot, row["id"])
+                )
+                c.commit()
+                return jsonify({"ok": True, "slot": slot, "moved": True})
+            return jsonify({"ok": True, "slot": None, "moved": False})
+
+        placed = _place_in_slot(c, pid, slot)
         c.commit()
-        return jsonify({"ok": True, "slot": placed})
+        return jsonify({"ok": True, "slot": placed, "moved": False})
 
     # ---------- 卡片 ----------
     @app.get("/api/cards")

@@ -52,6 +52,23 @@ def advance(stage: int, correct: bool, lapse: float = 0.5) -> tuple[int, str | N
     return new_stage, add_days(days), False
 
 
+def advance_early(stage: int, correct: bool, original_due: str | None) -> tuple[int, str | None, bool]:
+    """提前复习（还没到期就自己加练）的推进规则。
+
+    答对：照常升一档，但下次日期取 max(新档推算, 原到期日)。
+          没这个兜底的话，原到期日被手动拉远时，「提前练」反而把复习提前了。
+    答错：档位和日期都不动 —— 多练一次不该被惩罚，这是用户明确要的。
+    """
+    if not correct:
+        return stage, original_due, False
+    if stage >= len(INTERVALS):
+        return len(INTERVALS), None, True
+    new_stage = 2 if stage == 0 else stage + 1
+    planned = add_days(INTERVALS[new_stage - 1])
+    due = max(planned, original_due) if original_due else planned
+    return new_stage, due, False
+
+
 _PROB_SELECT = """
     SELECT p.*,
            (SELECT GROUP_CONCAT(c.title, '、') FROM card_problem cp
