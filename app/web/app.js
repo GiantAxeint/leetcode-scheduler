@@ -341,6 +341,8 @@ function planItem(r) {
       <button class="btn primary"${lock} onclick="quickReview(${r.problem_id},true)">答对</button>
       <button class="btn danger"${lock} onclick="quickReview(${r.problem_id},false)">未答对</button>
       <button class="btn ghost"${lock} onclick="openReview(${r.problem_id})">细想</button>
+      ${settled
+        ? `<button class="btn undo" onclick="undoReview(${r.problem_id})">撤回</button>` : ''}
       ${r.status === 'inbox'
         ? `<button class="btn ghost" onclick="pickCard(${r.problem_id})">归题型</button>` : ''}
     </div>
@@ -358,6 +360,19 @@ async function quickReview(pid, correct) {
     return;
   }
   toast(correct ? '答对，下次推后' : '未答对，明天再来');
+  loadToday();
+  refreshGate();
+}
+
+/* 撤回今天的判定：点错了用这个，档位和到期日一起回退到判定前 */
+async function undoReview(pid) {
+  try {
+    await api('/review/undo', { method: 'POST', body: { problem_id: pid }, silent: true });
+  } catch (e) {
+    toast(e.message);
+    return;
+  }
+  toast('已撤回，可以重新判定');
   loadToday();
   refreshGate();
 }

@@ -216,12 +216,17 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 .btn.primary:hover { opacity: .9; color: #fff; }
 .btn.ghost { border-color: transparent; color: var(--hint); }
 .btn.danger { color: var(--red); border-color: #f0cfcf; }
-/* 今日已判定的卡片：三个按钮全部锁掉，点不动也就不会重复推进档位 */
+/* 今日已判定的卡片：三个判定按钮灰到底，让人一眼看出点不动；
+   「撤回」用琥珀色区分，是失误操作时的唯一出口 */
 .btn:disabled, .btn:disabled:hover {
-  opacity: .45; cursor: not-allowed;
-  border-color: var(--line); color: var(--text);
+  cursor: not-allowed;
+  border-color: #e8e6df; color: #bcb9b0; background: #f6f5f1;
 }
-.btn.primary:disabled { background: var(--blue); color: #fff; opacity: .45; }
+.btn.primary:disabled, .btn.primary:disabled:hover {
+  background: #f0efea; color: #bcb9b0; border-color: #e8e6df;
+}
+.btn.undo { color: #8a5300; border-color: #e6d2ab; background: #fdf8ee; }
+.btn.undo:hover { border-color: #b97e00; color: #b97e00; }
 
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .row.end { justify-content: flex-end; }
@@ -284,9 +289,9 @@ pre.code {
 .plink:hover { color: var(--blue); border-bottom-color: var(--blue); }
 
 /* LeetCode 官方难度色 */
-.item.done { opacity: 1; background: #fafaf6; border-color: #e8e6df; }
-.item.done .t { color: #8f8d85; }
-.item.done .plink { border-bottom-color: #e3e1da; }
+/* 判定过的卡片保持正常外观：不可点的只是「答对/未答对/细想」，
+   整张卡不该变灰 —— 用户点错了还要能点「撤回」 */
+.item.done { border-color: var(--line); }
 
 /* 白底小字要看得清，LeetCode 原色对 13px 偏浅 */
 .plink.d-easy, .plain.d-easy { color: #008f7e; border-bottom-color: #9ee3d8; }

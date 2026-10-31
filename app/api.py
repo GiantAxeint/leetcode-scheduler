@@ -244,6 +244,80 @@ def create_app(root: Path | None = None) -> Flask:
             }
         )
 
+    @app.post("/api/review/undo")
+    def api_review_undo():
+        """撤回今天的判定 —— 手滑点错时用。
+
+        只允许撤今天最近的一条：更早的判定已经影响了后续排期，
+        倒着撤会把整条链搅乱，收益也远不如风险大。
+        """
+        c = conn()
+        b = request.get_json(force=True) or {}
+        pid = int(b.get("problem_id") or 0)
+        if not pid:
+            return jsonify({"error": "缺 problem_id"}), 400
+        p = c.execute("SELECT * FROM problem WHERE id=?", (pid,)).fetchone()
+        if not p:
+            return jsonify({"error": "题目不存在"}), 404
+
+        last = c.execute(
+            "SELECT * FROM review_log WHERE problem_id=? AND result IN ('correct','wrong') "
+            "ORDER BY id DESC LIMIT 1",
+            (pid,),
+        ).fetchone()
+        if not last:
+            return jsonify({"error": "没有可撤回的判定"}), 400
+        today = scheduler.today_str()
+        if (last["reviewed_at"] or "")[:10] != today:
+            return jsonify({"error": "只能撤回今天的判定"}), 400
+
+        stage_back = last["stage_from"] if last["stage_from"] is not None else 0
+        # 再往前一条判定的时间：撤回后 last_reviewed_at 要回退到它，
+        # 否则这道题会被当成「今天已经判过」，按钮还是灰的
+        prev = c.execute(
+            "SELECT reviewed_at FROM review_log "
+            "WHERE problem_id=? AND id<? AND result IN ('correct','wrong') "
+            "ORDER BY id DESC LIMIT 1",
+            (pid, last["id"]),
+        ).fetchone()
+
+        correct = last["result"] == "correct"
+        c.execute(
+            """UPDATE problem
+               SET stage=?, next_due=?, last_reviewed_at=?, pass_streak=?, fail_count=?
+               WHERE id=?""",
+            (
+                stage_back,
+                # 原 next_due 没存，回到今天最稳：当天到期的题本来就是这个值，
+                # 逾期题撤回后也该立刻重判，而不是继续背着逾期天数
+                today,
+                prev["reviewed_at"] if prev else None,
+                max(0, (p["pass_streak"] or 0) - 1) if correct else 0,
+                max(0, (p["fail_count"] or 0) - (0 if correct else 1)),
+                pid,
+            ),
+        )
+        # 撤回的是「出池」那一下，得把题放回池子，否则永远排不上
+        if p["phase"] == "done" and stage_back < 5:
+            c.execute("UPDATE problem SET phase='active' WHERE id=?", (pid,))
+        c.execute("DELETE FROM review_log WHERE id=?", (last["id"],))
+        c.execute(
+            "UPDATE daily_plan SET done=0 WHERE plan_date=? AND problem_id=?", (today, pid)
+        )
+        c.commit()
+
+        row = c.execute(
+            "SELECT stage, next_due, phase FROM problem WHERE id=?", (pid,)
+        ).fetchone()
+        return jsonify(
+            {
+                "ok": True,
+                "stage": row["stage"],
+                "next_due": row["next_due"],
+                "phase": row["phase"],
+            }
+        )
+
     @app.post("/api/plan/<int:plan_id>/done")
     def api_plan_done(plan_id: int):
         c = conn()
