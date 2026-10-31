@@ -455,7 +455,7 @@ async function loadCards() {
   const grid = cards.map((c) => `
     <div class="pcard ${c.status === 'archived' ? 'off' : ''}" onclick="openCardEditor(${c.id})">
       <div class="ptitle">${esc(c.title)}</div>
-      <div class="pcat">${esc(c.category || '未分类')}</div>
+      ${c.category ? `<div class="pcat">${esc(c.category)}</div>` : ''}
       <div class="pmeta">
         <span>挂 ${c.problem_count || 0} 题 · ${c.status === 'archived' ? '已收起' : '使用中'}</span>
         <a class="pact" onclick="event.stopPropagation();${c.status === 'archived'
