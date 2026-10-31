@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import config
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 DEFAULT_SETTINGS = {
     "queue_limit": "15",          # 在途：当月要复习的不同题目上限（同一题多次复习算 1）
@@ -194,6 +194,14 @@ def migrate(conn: sqlite3.Connection) -> None:
                 conn.execute(
                     "UPDATE problem SET next_due=? WHERE id=?", (_next_workday(d), r["id"])
                 )
+    if version < 8:
+        # 「撤回」要精确还原判定前的状态：next_due 反推不出来，
+        # solved 也可能是录题时就带着的（扩展抓的「已通过」），两者都必须当场记下来
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(review_log)")}
+        if "next_due_before" not in cols:
+            conn.execute("ALTER TABLE review_log ADD COLUMN next_due_before TEXT")
+        if "solved_before" not in cols:
+            conn.execute("ALTER TABLE review_log ADD COLUMN solved_before INTEGER")
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 

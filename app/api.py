@@ -229,6 +229,9 @@ def create_app(root: Path | None = None) -> Flask:
             int(b.get("passed") or 0), int(b.get("total") or 0),
             b.get("checks") or [], b.get("error_type"),
             int(b.get("duration_sec") or 0), b.get("note", ""),
+            # 撤回要吃这两个原值：next_due 反推不出来，solved 也可能是录题自带的
+            next_due_before=p["next_due"],
+            solved_before=p["solved"],
         )
         _mark_plan_done(c, pid)
         c.commit()
@@ -282,18 +285,30 @@ def create_app(root: Path | None = None) -> Flask:
         ).fetchone()
 
         correct = last["result"] == "correct"
+        # v8 之后每次判定都记了原值，能精确还原；v8 之前的老记录两列为 NULL，
+        # next_due 退回今天，solved 不敢瞎猜（可能是题录进来时就带的「已通过」）
+        next_due_back = last["next_due_before"] or today
+        solved_before = last["solved_before"]
+        if solved_before is None:
+            solved_val, solved_at_val = p["solved"], p["solved_at"]
+        elif solved_before:
+            solved_val, solved_at_val = 1, p["solved_at"]
+        else:
+            solved_val, solved_at_val = 0, None
+
         c.execute(
             """UPDATE problem
-               SET stage=?, next_due=?, last_reviewed_at=?, pass_streak=?, fail_count=?
+               SET stage=?, next_due=?, last_reviewed_at=?, pass_streak=?, fail_count=?,
+                   solved=?, solved_at=?
                WHERE id=?""",
             (
                 stage_back,
-                # 原 next_due 没存，回到今天最稳：当天到期的题本来就是这个值，
-                # 逾期题撤回后也该立刻重判，而不是继续背着逾期天数
-                today,
+                next_due_back,
                 prev["reviewed_at"] if prev else None,
                 max(0, (p["pass_streak"] or 0) - 1) if correct else 0,
                 max(0, (p["fail_count"] or 0) - (0 if correct else 1)),
+                solved_val,
+                solved_at_val,
                 pid,
             ),
         )
@@ -941,13 +956,15 @@ def _settings_payload(c: sqlite3.Connection) -> dict:
 
 
 def _log(c, problem_id, card_id, result, sfrom, sto, passed, total,
-         checks, error_type, dur, note):
+         checks, error_type, dur, note, next_due_before=None, solved_before=None):
     c.execute(
         """INSERT INTO review_log(problem_id,card_id,result,stage_from,stage_to,
-                                  passed,total,checks_json,error_type,duration_sec,note)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                                  passed,total,checks_json,error_type,duration_sec,note,
+                                  next_due_before,solved_before)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (problem_id, card_id, result, sfrom, sto, passed, total,
-         json.dumps(checks, ensure_ascii=False), error_type, dur, note),
+         json.dumps(checks, ensure_ascii=False), error_type, dur, note,
+         next_due_before, solved_before),
     )
 
 

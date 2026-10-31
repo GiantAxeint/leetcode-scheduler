@@ -87,7 +87,9 @@ CREATE TABLE IF NOT EXISTS review_log (
     checks_json TEXT NOT NULL DEFAULT '[]',
     error_type  TEXT,                               -- knowledge | index | execution
     duration_sec INTEGER NOT NULL DEFAULT 0,
-    note        TEXT NOT NULL DEFAULT ''
+    note        TEXT NOT NULL DEFAULT '',
+    next_due_before TEXT,                           -- 判定前的到期日，供「撤回」精确还原
+    solved_before   INTEGER                         -- 判定前的 solved 标记，同上
 );
 
 CREATE INDEX IF NOT EXISTS idx_review_card ON review_log(card_id, reviewed_at);
