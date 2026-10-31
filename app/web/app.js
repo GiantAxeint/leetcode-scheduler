@@ -339,7 +339,7 @@ function planItem(r) {
       <button class="btn danger" onclick="quickReview(${r.problem_id},false)">未答对</button>
       <button class="btn ghost" onclick="openReview(${r.problem_id})">细想</button>
       ${r.status === 'inbox'
-        ? `<button class="btn ghost" onclick="openCardEditor(null,${r.problem_id})">归题型</button>` : ''}
+        ? `<button class="btn ghost" onclick="pickCard(${r.problem_id})">归题型</button>` : ''}
     </div>
   </div>`;
 }
@@ -452,31 +452,72 @@ async function skipReview() {
 /* ---------------- 题型卡 ---------------- */
 async function loadCards() {
   const cards = await api('/cards');
-  const rows = cards.map((c) => `
-    <tr>
-      <td><a href="#" onclick="event.preventDefault();openCardEditor(${c.id})">${esc(c.title)}</a></td>
-      <td>${esc(c.category || '')}</td>
-      <td>${c.status === 'archived' ? '已收起' : '使用中'}</td>
-      <td>${c.problem_count || 0}</td>
-      <td class="row">
-        <button class="btn ghost" onclick="openCardEditor(${c.id})">编辑</button>
-        ${c.status === 'archived'
-          ? `<button class="btn ghost" onclick="reopenCard(${c.id})">回炉</button>`
-          : `<button class="btn ghost" onclick="archiveCard(${c.id})">收起</button>`}
-      </td>
-    </tr>`).join('');
+  const grid = cards.map((c) => `
+    <div class="pcard ${c.status === 'archived' ? 'off' : ''}" onclick="openCardEditor(${c.id})">
+      <div class="ptitle">${esc(c.title)}</div>
+      <div class="pcat">${esc(c.category || '未分类')}</div>
+      <div class="pmeta">
+        <span>挂 ${c.problem_count || 0} 题 · ${c.status === 'archived' ? '已收起' : '使用中'}</span>
+        <a class="pact" onclick="event.stopPropagation();${c.status === 'archived'
+          ? `reopenCard(${c.id})` : `archiveCard(${c.id})`}">${c.status === 'archived' ? '回炉' : '收起'}</a>
+      </div>
+    </div>`).join('');
   $('#view-cards').innerHTML = `
     <div class="row" style="margin-bottom:6px">
       <button class="btn primary" onclick="openCardEditor(null)">新建题型</button>
-      <span class="muted">共 ${cards.length} 张</span>
+      <span class="muted">共 ${cards.length} 个</span>
     </div>
     <div class="cap" style="margin-bottom:14px">
-      题型是归纳用的容器：写清触发信号和骨架，复习时作为参考答案。它不排期，排期的是题。
+      题型是装题的框：写清触发信号和骨架，复习时当参考。它不排期，排期的是题。
     </div>
-    <div class="panel"><table>
-      <thead><tr><th>题型</th><th>分类</th><th>状态</th><th>挂题数</th><th></th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="5" class="muted">还没有题型</td></tr>'}</tbody>
-    </table></div>`;
+    ${cards.length
+      ? `<div class="card-grid">${grid}</div>`
+      : '<div class="panel"><div class="muted" style="padding:20px 4px">还没有题型，先建一个</div></div>'}`;
+}
+
+/* 归题型：先从已有题型里挑，挑不到再新建 */
+let PICK = { pid: null, cards: [], title: '' };
+
+async function pickCard(pid) {
+  const [detail, cards] = await Promise.all([
+    api('/problems/' + pid),
+    api('/cards?status=active'),
+  ]);
+  PICK = { pid, cards, title: detail.problem.title };
+  modal(`
+    <h2 style="margin:0 0 4px;font-size:17px;font-weight:500">归题型</h2>
+    <div class="muted" style="margin-bottom:12px">${esc(PICK.title)} → 选一个已有题型</div>
+    <input id="pick-q" placeholder="搜题型名或分类" oninput="drawPick(this.value)"
+           style="width:100%;margin-bottom:10px">
+    <div id="pick-list" style="max-height:320px;overflow:auto"></div>
+    <div class="row end" style="margin-top:16px">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn primary" onclick="closeModal();openCardEditor(null,${pid})">新建题型</button>
+    </div>`);
+  drawPick('');
+  $('#pick-q').focus();
+}
+
+function drawPick(keyword) {
+  const kw = (keyword || '').trim().toLowerCase();
+  const list = PICK.cards.filter((c) =>
+    !kw || `${c.title}${c.category || ''}`.toLowerCase().includes(kw));
+  $('#pick-list').innerHTML = list.length
+    ? list.map((c) => `
+      <div class="pick-row" onclick="linkProblem(${c.id})">
+        <span class="pick-name">${esc(c.title)}</span>
+        <span class="muted">${esc(c.category || '未分类')} · 已挂 ${c.problem_count || 0} 题</span>
+      </div>`).join('')
+    : `<div class="muted" style="padding:14px 4px">${PICK.cards.length ? '没匹配到' : '还没有题型，点右下角新建'}</div>`;
+}
+
+async function linkProblem(cid) {
+  await api(`/problems/${PICK.pid}/link`, { method: 'POST', body: { card_id: cid } });
+  const c = PICK.cards.find((x) => x.id === cid);
+  closeModal();
+  toast(`已归到「${c ? c.title : '题型'}」`);
+  loadProblems();
+  if (CURRENT_VIEW === 'today') loadToday();
 }
 
 async function openCardEditor(id, attachProblem) {
@@ -547,7 +588,7 @@ async function loadProblems() {
   const inboxRows = inbox.map((p) => `
     <tr><td>${p.leetcode_id || ''}</td>
     <td>${titleLink(p.title, p)}</td>
-    <td><button class="btn ghost" onclick="openCardEditor(null,${p.id})">归题型</button></td>
+    <td><button class="btn ghost" onclick="pickCard(${p.id})">归题型</button></td>
     <td><button class="btn ghost" onclick="delProblem(${p.id})">删除</button></td></tr>`).join('');
   const PHASE = { active: '在途', queued: '候补', done: '完成' };
   const allRows = all.slice(0, 100).map((p) => `

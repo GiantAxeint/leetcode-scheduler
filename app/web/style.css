@@ -171,6 +171,37 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 .badge.od1 { background: #fdf0d9; color: #8a5a00; }
 .badge.od2 { background: #fbe0e0; color: #a32d2d; }
 
+/* 归题型选择器 */
+.pick-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; margin-bottom: 6px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: #fff; cursor: pointer;
+}
+.pick-row:hover { border-color: var(--blue); background: #f6fbff; }
+.pick-name { flex: 1; font-weight: 500; font-size: 13.5px; }
+
+/* 题型框 */
+.card-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+}
+.pcard {
+  border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px 16px; background: #fff; cursor: pointer;
+  transition: border-color .12s, box-shadow .12s;
+}
+.pcard:hover { border-color: var(--blue); box-shadow: 0 2px 10px rgba(20, 20, 18, .06); }
+.pcard.off { background: #fafaf6; }
+.pcard .ptitle { font-weight: 500; margin-bottom: 4px; }
+.pcard .pcat { font-size: 12px; color: var(--hint); margin-bottom: 12px; }
+.pcard .pmeta {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; color: var(--sub);
+}
+.pcard .pact { color: var(--hint); cursor: pointer; text-decoration: none; }
+.pcard .pact:hover { color: var(--blue); text-decoration: underline; }
+
 .btn {
   border: 1px solid var(--line); background: #fff; color: var(--text);
   padding: 6px 14px; border-radius: 8px; cursor: pointer;
