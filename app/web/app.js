@@ -329,15 +329,18 @@ function planItem(r) {
   const overBadge = over > 0
     ? `<span class="badge ${over >= 3 ? 'od2' : 'od1'}">逾期 ${over} 天</span>`
     : '';
-  return `<div class="item ${r.done ? 'done' : ''}" draggable="true" data-plan="${r.plan_id}">
+  // 一天只判一次：判定过就把三个按钮锁掉，否则连点会一路 0→2→3→4 把档位推飞
+  const settled = !!(r.done || r.reviewed_today);
+  const lock = settled ? ' disabled' : '';
+  return `<div class="item ${settled ? 'done' : ''}" draggable="true" data-plan="${r.plan_id}">
     <div class="t">${titleLink(r.title, r)}<span class="badge ${stage ? 'due' : 'new'}">${badge}</span>${overBadge}</div>
-    <div class="m">${r.done ? '<span style="color:#3b6d11">✓ 已处理</span> · ' : ''}${
+    <div class="m">${settled ? '<span style="color:#3b6d11">✓ 已处理</span> · ' : ''}${
       r.leetcode_id ? 'LeetCode ' + r.leetcode_id : '未绑定题号'}${
       r.cards ? ' · ' + esc(r.cards) : ' · 未归题型'}</div>
     <div class="row" style="margin-top:8px">
-      <button class="btn primary" onclick="quickReview(${r.problem_id},true)">答对</button>
-      <button class="btn danger" onclick="quickReview(${r.problem_id},false)">未答对</button>
-      <button class="btn ghost" onclick="openReview(${r.problem_id})">细想</button>
+      <button class="btn primary"${lock} onclick="quickReview(${r.problem_id},true)">答对</button>
+      <button class="btn danger"${lock} onclick="quickReview(${r.problem_id},false)">未答对</button>
+      <button class="btn ghost"${lock} onclick="openReview(${r.problem_id})">细想</button>
       ${r.status === 'inbox'
         ? `<button class="btn ghost" onclick="pickCard(${r.problem_id})">归题型</button>` : ''}
     </div>
@@ -506,7 +509,7 @@ function drawPick(keyword) {
     ? list.map((c) => `
       <div class="pick-row" onclick="linkProblem(${c.id})">
         <span class="pick-name">${esc(c.title)}</span>
-        <span class="muted">${esc(c.category || '未分类')} · 已挂 ${c.problem_count || 0} 题</span>
+        <span class="muted">${c.category ? esc(c.category) + ' · ' : ''}已挂 ${c.problem_count || 0} 题</span>
       </div>`).join('')
     : `<div class="muted" style="padding:14px 4px">${PICK.cards.length ? '没匹配到' : '还没有题型，点右下角新建'}</div>`;
 }
@@ -530,14 +533,6 @@ async function openCardEditor(id, attachProblem) {
       <textarea id="f-trigger" placeholder="连续子数组 + 求最短/最长 + 有单调性">${esc(c.trigger_signals || '')}</textarea></label>
     <label class="field"><span>一句话本质</span><input id="f-essence" value="${esc(c.essence || '')}" placeholder="用窗口吃掉不满足的部分"></label>
     <label class="field"><span>骨架代码</span><textarea id="f-code" style="min-height:120px;font-family:Consolas,monospace">${esc(c.skeleton_code || '')}</textarea></label>
-    <div class="grid2">
-      <label class="field"><span>边界与坑</span><textarea id="f-pitfalls">${esc(c.pitfalls || '')}</textarea></label>
-      <label class="field"><span>变形族</span><textarea id="f-variants">${esc(c.variants || '')}</textarea></label>
-    </div>
-    <div class="grid2">
-      <label class="field"><span>复杂度</span><input id="f-complexity" value="${esc(c.complexity || '')}"></label>
-      <label class="field"><span>分类</span><input id="f-category" value="${esc(c.category || '')}"></label>
-    </div>
     ${id ? `
     <div class="cap" style="margin:18px 0 8px">这个题型下的题 · 共 ${(d.problems || []).length} 道</div>
     <div id="card-prob-list">${cardProbRows(id, d.problems || [])}</div>
@@ -626,11 +621,19 @@ async function saveCard(id, attachProblem) {
     trigger_signals: $('#f-trigger').value,
     essence: $('#f-essence').value,
     skeleton_code: $('#f-code').value,
-    pitfalls: $('#f-pitfalls').value,
-    variants: $('#f-variants').value,
-    complexity: $('#f-complexity').value,
-    category: $('#f-category').value,
   };
+  // 边界与坑 / 变形族 / 复杂度 / 分类 这四项暂时从表单撤了。
+  // 只有在输入框存在时才提交，否则编辑一次就把库里已有的内容清空了
+  // （后端 PUT 是部分更新，不传的键原样保留）。
+  for (const [key, sel] of [
+    ['pitfalls', '#f-pitfalls'],
+    ['variants', '#f-variants'],
+    ['complexity', '#f-complexity'],
+    ['category', '#f-category'],
+  ]) {
+    const el = $(sel);
+    if (el) body[key] = el.value;
+  }
   if (!body.title.trim()) { toast('题型名不能为空'); return; }
   if (id) {
     await api('/cards/' + id, { method: 'PUT', body });

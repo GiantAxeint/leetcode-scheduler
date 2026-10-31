@@ -216,6 +216,12 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 .btn.primary:hover { opacity: .9; color: #fff; }
 .btn.ghost { border-color: transparent; color: var(--hint); }
 .btn.danger { color: var(--red); border-color: #f0cfcf; }
+/* 今日已判定的卡片：三个按钮全部锁掉，点不动也就不会重复推进档位 */
+.btn:disabled, .btn:disabled:hover {
+  opacity: .45; cursor: not-allowed;
+  border-color: var(--line); color: var(--text);
+}
+.btn.primary:disabled { background: var(--blue); color: #fff; opacity: .45; }
 
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .row.end { justify-content: flex-end; }

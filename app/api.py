@@ -142,6 +142,8 @@ def create_app(root: Path | None = None) -> Flask:
                    p.title, p.leetcode_id, p.url, p.slug, p.difficulty,
                    p.stage, p.next_due, p.status,
                    CAST(julianday(?) - julianday(p.next_due) AS INTEGER) AS overdue,
+                   (p.last_reviewed_at IS NOT NULL
+                    AND substr(p.last_reviewed_at, 1, 10) = ?) AS reviewed_today,
                    (SELECT GROUP_CONCAT(cc.title, '、') FROM card_problem cp
                     JOIN pattern_card cc ON cc.id = cp.card_id
                     WHERE cp.problem_id = p.id) AS cards
@@ -150,7 +152,7 @@ def create_app(root: Path | None = None) -> Flask:
             WHERE d.plan_date = ?
             ORDER BY CASE d.slot WHEN 'morning' THEN 0 WHEN 'noon' THEN 1 ELSE 2 END, d.id
             """,
-            (today, today),
+            (today, today, today),
         ).fetchall()
         slots: dict[str, list] = {"morning": [], "noon": [], "evening": []}
         for r in rows:
@@ -185,6 +187,17 @@ def create_app(root: Path | None = None) -> Flask:
             _mark_plan_done(c, pid)
             c.commit()
             return jsonify({"result": "skip", "stage": p["stage"], "next_due": p["next_due"]})
+
+        # 一天只判一次。原来没有任何拦截，连点「答对」会 0→2→3→4 一路把档位推上去，
+        # 用户看到的是「我只是连点了几下，怎么就变 7 天后了」。
+        # force=true 留给将来「手动改判」，界面暂不暴露。
+        if (p["last_reviewed_at"] or "")[:10] == scheduler.today_str() and not b.get("force"):
+            return jsonify({
+                "error": "这道题今天已经判定过了，明天再来",
+                "code": "already_reviewed",
+                "stage": p["stage"],
+                "next_due": p["next_due"],
+            }), 409
 
         correct = bool(b.get("correct"))
         stage_from = p["stage"] or 0
