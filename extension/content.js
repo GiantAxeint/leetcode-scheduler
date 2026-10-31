@@ -9,12 +9,14 @@
   let cards = [];
   let folded = false;
 
-  const send = (msg) =>
+  // waitMs 要覆盖「主程序没开 → 走 scj:// 拉起来 → 等服务就绪」这几秒，
+  // 否则会在程序刚启动时误报「已暂存」
+  const send = (msg, waitMs = 5000) =>
     new Promise((resolve) => {
       let done = false;
       const finish = (v) => { if (!done) { done = true; resolve(v || { ok: false }); } };
       // 后台 service worker 可能被浏览器休眠，兜个超时，别让按钮一直没反应
-      setTimeout(() => finish({ ok: false, offline: true }), 5000);
+      setTimeout(() => finish({ ok: false, offline: true }), waitMs);
       try {
         chrome.runtime.sendMessage(msg, (res) => finish(res));
       } catch (e) {
@@ -179,10 +181,11 @@
     btn.disabled = true;
     btn.textContent = '提交中…';
     try {
-      const res = await send({ type: 'api', path: '/capture', method: 'POST', body });
+      const res = await send({ type: 'api', path: '/capture', method: 'POST', body }, 12000);
       if (res.ok) {
         const d = res.data || {};
         if (d.queued) flash('已录用，在途已满，排进候补', 'warn');
+        else if (res.launched) flash('已启动主程序并录用', 'ok');
         else flash('录用成功', 'ok');
         refreshStatus();
       } else if (res.offline) {

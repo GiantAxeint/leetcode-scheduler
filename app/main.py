@@ -15,6 +15,7 @@ import threading
 import time
 import urllib.request
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .api import create_app
 
@@ -22,6 +23,11 @@ APP_MARK = "刷题调度"
 PORT_START, PORT_END = 8765, 8785
 
 HEALTH_TIMEOUT = 8.0
+
+# 本机环回请求绝对不能走系统代理：用户开着 Clash / 公司代理时，
+# http_proxy 会把 127.0.0.1 也转给代理，结果探测自家服务得到 502 或连接拒绝，
+# 表现出来就是「明明开着程序却说没开」。实测踩过一次。
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def _log(msg: str) -> None:
@@ -32,19 +38,34 @@ def _log(msg: str) -> None:
         pass
 
 
+def _probe(port: int) -> int | None:
+    try:
+        with _LOCAL_OPENER.open(
+            f"http://127.0.0.1:{port}/api/health", timeout=0.3
+        ) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return port if data.get("app") == APP_MARK else None
+    except Exception:
+        return None
+
+
 def existing_instance() -> int | None:
-    """已经有一个实例在跑就复用它，别起第二个去抢同一个库。"""
-    for port in range(PORT_START, PORT_END + 1):
-        try:
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/api/health", timeout=0.4
-            ) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            if data.get("app") == APP_MARK:
-                return port
-        except Exception:
-            continue
-    return None
+    """已经有一个实例在跑就复用它，别起第二个去抢同一个库。
+
+    必须并发探测：串行扫 21 个端口时，防火墙对未监听端口是丢包而不是回 RST，
+    每个都要等满 0.4s 超时 —— 实测冷启动光这一项就吃掉 8.5 秒。
+    """
+    ports = list(range(PORT_START, PORT_END + 1))
+    pool = ThreadPoolExecutor(max_workers=len(ports))
+    try:
+        futures = [pool.submit(_probe, p) for p in ports]
+        for fut in as_completed(futures):
+            found = fut.result()
+            if found is not None:
+                return found
+        return None
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def free_port() -> int:
@@ -65,7 +86,7 @@ def wake_instance(port: int) -> bool:
         f"http://127.0.0.1:{port}/api/ui/show", method="POST", data=b""
     )
     try:
-        with urllib.request.urlopen(req, timeout=1.5) as resp:
+        with _LOCAL_OPENER.open(req, timeout=1.5) as resp:
             return 200 <= resp.status < 300
     except Exception:
         return False
@@ -76,7 +97,7 @@ def wait_health(port: int, timeout: float = HEALTH_TIMEOUT) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(
+            with _LOCAL_OPENER.open(
                 f"http://127.0.0.1:{port}/api/health", timeout=0.5
             ) as resp:
                 if json.loads(resp.read().decode("utf-8")).get("app") == APP_MARK:
@@ -114,9 +135,11 @@ def main() -> int:
     if running:
         url = f"http://127.0.0.1:{running}/"
         _log(f"已有实例在跑：{url}")
-        if not silent:
-            if not wake_instance(running):
-                _open(url)  # 旧版本没有 /api/ui/show，退回开浏览器
+        if tray_only:
+            # 开机自启 / 扩展经 scj:// 唤起：进程已经在跑，什么都不用做，更不该弹窗
+            return 0
+        if not wake_instance(running):
+            _open(url)  # 旧版本没有 /api/ui/show，退回开浏览器
         return 0
 
     app = create_app()

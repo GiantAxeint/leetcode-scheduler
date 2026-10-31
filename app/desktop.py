@@ -34,7 +34,13 @@ GUI_BACKEND = "edgechromium"  # 明确指定，避免 pywebview 在 Windows 上�
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 AUTOSTART_NAME = "刷题调度"
 
+PROTOCOL_NAME = "scj"  # 扩展里对应的地址是 scj://open
+
 LOG_MAX_BYTES = 1_000_000
+
+# 环回请求绕开系统代理，理由同 main.py：开着 Clash 时 http_proxy 会把
+# 127.0.0.1 也转出去，读设置直接读成 502
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 # ---------------------------------------------------------------- 日志
@@ -64,14 +70,48 @@ class ShellLog:
 
 
 # ---------------------------------------------------------------- 开机自启
-def autostart_command() -> str:
-    """写进注册表的命令行。开机自启一律带 --tray，只进托盘不弹窗。"""
+def _launch_command() -> str:
+    """开机自启和 scj:// 协议都用这一条命令：一律 --tray，只进托盘不弹窗。"""
     if getattr(sys, "frozen", False):
         return f'"{sys.executable}" --tray'
     py = Path(sys.executable)
     pyw = py.with_name("pythonw.exe")
     entry = paths.base_dir() / "run.py"
     return f'"{pyw if pyw.is_file() else py}" "{entry}" --tray'
+
+
+def autostart_command() -> str:
+    return _launch_command()
+
+
+# ---------------------------------------------------------------- 自定义协议
+def register_protocol() -> bool:
+    """把 scj:// 挂到本程序，扩展靠它把没开的程序拉起来。
+
+    写 HKCU 不需要管理员权限，CreateKey 幂等，所以每次启动都刷一遍最省事
+    —— 用户搬了目录或换了 exe 位置，下一次启动就自动修好。
+    """
+    import winreg
+
+    base = rf"Software\Classes\{PROTOCOL_NAME}"
+    icon_exe = (
+        sys.executable
+        if getattr(sys, "frozen", False)
+        else str(Path(sys.executable).with_name("pythonw.exe"))
+    )
+    try:
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, base) as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "URL:刷题调度")
+            winreg.SetValueEx(key, "URL Protocol", 0, winreg.REG_SZ, "")
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, base + r"\DefaultIcon") as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, f"{icon_exe},0")
+        with winreg.CreateKey(
+            winreg.HKEY_CURRENT_USER, base + r"\shell\open\command"
+        ) as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, _launch_command())
+        return True
+    except OSError:
+        return False
 
 
 def _startup_lnk() -> Path | None:
@@ -163,7 +203,7 @@ class DesktopShell:
         这里再开一个连接会在老库首次启动时和它抢写锁（交接文档记过这个坑）。
         """
         try:
-            with urllib.request.urlopen(
+            with _LOCAL_OPENER.open(
                 f"http://127.0.0.1:{self.port}/api/settings", timeout=1.0
             ) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
@@ -311,6 +351,10 @@ class DesktopShell:
         host.register("autostart_enabled", autostart_enabled)
         host.register("autostart_set", set_autostart)
         host.register("close_action", self.close_action)
+
+        # 扩展靠这个协议把没开的程序拉起来；注册失败不影响本机使用
+        if not register_protocol():
+            self.log.write("scj:// 协议注册失败，扩展无法自动拉起程序")
 
         ico = paths.icon_path()
         self.window = webview.create_window(

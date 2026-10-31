@@ -3,8 +3,10 @@ __pycache__/
 *.pyc
 build/
 build_x*/
+build_v*/
 dist/
 dist_x*/
+dist_v*/
 data/
 *.spec
 # 这个 spec 是手改的（console=False / hiddenimports），属于源码不是生成物

@@ -41,6 +41,47 @@ async function findPort(force = false) {
   return null;
 }
 
+/* 程序没开时把它拉起来：走自定义协议 scj://，桌面版启动时已把协议写进注册表。
+   没有这一步，用户必须先手动点开始菜单才能录用，扩展还是「半残」。 */
+const PROTOCOL_URL = 'scj://open';
+let launching = null;
+
+async function launchApp() {
+  // 连点两下按钮会发两次消息，唤醒动作只允许有一个在飞
+  if (launching) return launching;
+  launching = (async () => {
+    try {
+      const tab = await chrome.tabs.create({ url: PROTOCOL_URL, active: false });
+      // 协议被接管后这个标签页是空白页，收掉，别留在标签栏里
+      if (tab && tab.id != null) {
+        setTimeout(() => {
+          chrome.tabs.remove(tab.id).catch(() => {});
+        }, 1200);
+      }
+      return true;
+    } catch (e) {
+      return false;
+    } finally {
+      setTimeout(() => { launching = null; }, 3000);
+    }
+  })();
+  return launching;
+}
+
+async function ensureApp(timeoutMs = 8000) {
+  // 8 秒：打包后冷启动实测 2~3 秒，留余量给杀毒软件首次扫描
+  const port = await findPort(true);
+  if (port) return port;
+  if (!(await launchApp())) return null;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 600));
+    const p = await findPort(true);
+    if (p) return p;
+  }
+  return null;
+}
+
 async function getQueue() {
   const got = await chrome.storage.local.get(QUEUE_KEY);
   return got[QUEUE_KEY] || [];
@@ -104,10 +145,26 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     if (msg.type === 'api') {
       const method = (msg.method || 'POST').toUpperCase();
       const job = { path: msg.path, method, body: msg.body };
-      const r = await send(job);
+      let r = await send(job);
       if (r.ok) {
         reply({ ok: true, data: r.data, pending: (await getQueue()).length });
         return;
+      }
+      if (r.offline && method !== 'GET') {
+        // 只有写操作（录用）才值得把程序拉起来；GET 探测不该弹人家窗口
+        const port = await ensureApp();
+        if (port) {
+          r = await send(job);
+          if (r.ok) {
+            reply({
+              ok: true,
+              launched: true,
+              data: r.data,
+              pending: (await getQueue()).length,
+            });
+            return;
+          }
+        }
       }
       if (r.offline) {
         if (method !== 'GET') await enqueue(job);
