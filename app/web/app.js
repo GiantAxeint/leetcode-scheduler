@@ -538,12 +538,86 @@ async function openCardEditor(id, attachProblem) {
       <label class="field"><span>复杂度</span><input id="f-complexity" value="${esc(c.complexity || '')}"></label>
       <label class="field"><span>分类</span><input id="f-category" value="${esc(c.category || '')}"></label>
     </div>
+    ${id ? `
+    <div class="cap" style="margin:18px 0 8px">这个题型下的题 · 共 ${(d.problems || []).length} 道</div>
+    <div id="card-prob-list">${cardProbRows(id, d.problems || [])}</div>
+    <button class="btn ghost" onclick="pickProblemToCard(${id})">加入题目</button>` : ''}
     <div class="row end">
       ${id ? `<button class="btn danger" onclick="deleteCard(${id})">删除</button>` : ''}
       <div class="spacer"></div>
       <button class="btn" onclick="closeModal()">取消</button>
       <button class="btn primary" onclick="saveCard(${id || 'null'},${attachProblem || 'null'})">保存</button>
     </div>`);
+}
+
+function cardProbRows(cid, probs) {
+  if (!probs.length) {
+    return '<div class="muted" style="padding:10px 2px">还没有题，点下面的按钮加</div>';
+  }
+  const rows = probs.map((p) => `
+    <tr>
+      <td>${p.leetcode_id || ''}</td>
+      <td>${titleLink(p.title, p)}</td>
+      <td>${p.difficulty
+        ? `<span class="dif ${diffClass(p.difficulty).replace('d-', '')}">${esc(p.difficulty)}</span>`
+        : ''}</td>
+      <td>${p.stage ? 'S' + p.stage : '新题'}</td>
+      <td style="text-align:right"><a class="pact" onclick="unlinkProblem(${cid},${p.id})">移除</a></td>
+    </tr>`).join('');
+  return `<table><thead><tr><th>题号</th><th>标题</th><th>难度</th><th>阶段</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+}
+
+async function unlinkProblem(cid, pid) {
+  const r = await api(`/cards/${cid}/problems/${pid}`, { method: 'DELETE' });
+  const d = await api('/cards/' + cid);
+  $('#card-prob-list').innerHTML = cardProbRows(cid, d.problems || []);
+  toast(r.back_to_inbox ? '已移除，题回到待归纳题型区' : '已移除');
+  refreshGate();
+  loadProblems();
+}
+
+let PICKP = { cid: null, pool: [] };
+
+async function pickProblemToCard(cid) {
+  const [all, detail] = await Promise.all([api('/problems'), api('/cards/' + cid)]);
+  const inCard = new Set((detail.problems || []).map((p) => p.id));
+  PICKP = { cid, pool: all.filter((p) => !inCard.has(p.id)) };
+  modal(`
+    <h2 style="margin:0 0 4px;font-size:17px;font-weight:500">加入题目</h2>
+    <div class="muted" style="margin-bottom:12px">${esc(detail.card.title)} ← 选一道题</div>
+    <input id="pp-q" placeholder="搜题号或标题" oninput="drawPickProblem(this.value)"
+           style="width:100%;margin-bottom:10px">
+    <div id="pp-list" style="max-height:320px;overflow:auto"></div>
+    <div class="row end" style="margin-top:16px">
+      <button class="btn" onclick="closeModal()">关闭</button>
+    </div>`);
+  drawPickProblem('');
+  $('#pp-q').focus();
+}
+
+function drawPickProblem(keyword) {
+  const kw = (keyword || '').trim().toLowerCase();
+  const list = PICKP.pool.filter((p) =>
+    !kw || `${p.title}${p.leetcode_id || ''}`.toLowerCase().includes(kw));
+  $('#pp-list').innerHTML = list.length
+    ? list.slice(0, 200).map((p) => `
+      <div class="pick-row" onclick="attachToCard(${p.id})">
+        <span class="pick-name">${titleLink(p.title, p)}</span>
+        <span class="muted">${p.leetcode_id ? '#' + p.leetcode_id : ''} ·
+          ${p.status === 'inbox' ? '待归纳' : '在别的题型里'}</span>
+      </div>`).join('')
+    : '<div class="muted" style="padding:14px 4px">没有可加的题</div>';
+}
+
+async function attachToCard(pid) {
+  await api(`/problems/${pid}/link`, { method: 'POST', body: { card_id: PICKP.cid } });
+  const cid = PICKP.cid;
+  closeModal();
+  toast('已加入');
+  loadProblems();
+  refreshGate();
+  openCardEditor(cid);          // 回到题型编辑，能看到刚加进去的题
 }
 
 async function saveCard(id, attachProblem) {
@@ -612,7 +686,7 @@ async function loadProblems() {
           <select id="p-diff"><option value="">—</option><option>简单</option><option>中等</option><option>困难</option></select></label>
         <label class="field"><span>排进今天哪一班</span>
           <select id="p-slot">
-            <option value="">不排（只进待归卡区）</option>
+            <option value="auto" selected>自动（按录入时间）</option>
             <option value="morning">早班</option>
             <option value="noon">午班</option>
             <option value="evening">晚班</option>
@@ -652,7 +726,8 @@ async function addProblem() {
     return;
   }
   if (r.queued) toast('已录用，在途已满，排进候补');
-  else toast(body.slot ? '录用成功，已排进' + SLOT_LABEL[body.slot] : '录用成功，已进在途');
+  else if (r.slot) toast(`录用成功，已按时间排进${SLOT_LABEL[r.slot]}`);
+  else toast('录用成功，已进在途');
   loadProblems();
   refreshGate();
   if (CURRENT_VIEW === 'today') loadToday();

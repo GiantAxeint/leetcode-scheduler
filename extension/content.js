@@ -73,11 +73,6 @@
     };
   }
 
-  function autoSlot() {
-    const h = new Date().getHours();
-    return h < 12 ? 'morning' : h < 18 ? 'noon' : 'evening';
-  }
-
   function el(tag, cls, txt) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -99,8 +94,8 @@
         <div class="scj-line">
           <label>排进</label>
           <select class="scj-slot">
+            <option value="auto">自动（按时间）</option>
             ${SLOTS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}
-            <option value="">不排</option>
           </select>
         </div>
         <div class="scj-line">
@@ -226,7 +221,7 @@
         submit({ new_card_title: name });
       });
     }
-    root.querySelector('.scj-slot').value = autoSlot();
+    root.querySelector('.scj-slot').value = 'auto';
     paint();
     loadCards();
     refreshStatus();

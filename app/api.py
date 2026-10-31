@@ -221,9 +221,9 @@ def create_app(root: Path | None = None) -> Flask:
         row = c.execute("SELECT phase FROM problem WHERE id=?", (pid,)).fetchone()
         if row and row["phase"] != "active":
             return jsonify({"error": "这题还在候补队列里，先提到在途"}), 409
-        _place_in_slot(c, pid, b.get("slot"))
+        placed = _place_in_slot(c, pid, b.get("slot"))
         c.commit()
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "slot": placed})
 
     # ---------- 卡片 ----------
     @app.get("/api/cards")
@@ -464,10 +464,9 @@ def create_app(root: Path | None = None) -> Flask:
              phase, scheduler.due_date(), solved, scheduler.today_str() if solved else None),
         )
         pid = cur.lastrowid
-        if phase == "active":
-            _place_in_slot(c, pid, b.get("slot"))
+        placed = _place_in_slot(c, pid, b.get("slot")) if phase == "active" else None
         c.commit()
-        return jsonify({"id": pid, "queued": phase == "queued"})
+        return jsonify({"id": pid, "queued": phase == "queued", "slot": placed})
 
     @app.put("/api/problems/<int:pid>")
     def api_problem_update(pid: int):
@@ -534,11 +533,11 @@ def create_app(root: Path | None = None) -> Flask:
             )
             c.execute("UPDATE problem SET status='linked' WHERE id=?", (pid,))
 
-        if phase == "active":
-            _place_in_slot(c, pid, b.get("slot"))
+        placed = _place_in_slot(c, pid, b.get("slot")) if phase == "active" else None
         c.commit()
         return jsonify({"problem_id": pid, "created": created, "card_id": card_id,
-                        "duplicate": not created, "queued": phase == "queued"})
+                        "duplicate": not created, "queued": phase == "queued",
+                        "slot": placed})
 
     @app.post("/api/problems/<int:pid>/link")
     def api_problem_link(pid: int):
@@ -549,6 +548,19 @@ def create_app(root: Path | None = None) -> Flask:
         c.execute("UPDATE problem SET status='linked' WHERE id=?", (pid,))
         c.commit()
         return jsonify({"ok": True})
+
+    @app.delete("/api/cards/<int:cid>/problems/<int:pid>")
+    def api_card_unlink(cid: int, pid: int):
+        """从题型里移除一道题，没挂别的题型就退回待归纳区。"""
+        c = conn()
+        c.execute("DELETE FROM card_problem WHERE card_id=? AND problem_id=?", (cid, pid))
+        left = c.execute(
+            "SELECT COUNT(*) c FROM card_problem WHERE problem_id=?", (pid,)
+        ).fetchone()["c"]
+        if left == 0:
+            c.execute("UPDATE problem SET status='inbox' WHERE id=?", (pid,))
+        c.commit()
+        return jsonify({"ok": True, "back_to_inbox": left == 0})
 
     # ---------- 检验项 ----------
     @app.get("/api/checks")
@@ -758,20 +770,33 @@ def create_app(root: Path | None = None) -> Flask:
 SLOTS = ("morning", "noon", "evening")
 
 
-def _place_in_slot(c: sqlite3.Connection, problem_id: int, slot: str | None) -> None:
-    """给了班次就直接排进今天的那个班；没给就留在待归卡区等下一次排班。"""
+def _auto_slot() -> str:
+    """按录入时刻自动落到哪个班：上午 12 点前早班，18 点前午班，之后晚班。"""
+    h = datetime.now().hour
+    if h < 12:
+        return "morning"
+    if h < 18:
+        return "noon"
+    return "evening"
+
+
+def _place_in_slot(c: sqlite3.Connection, problem_id: int, slot: str | None) -> str | None:
+    """给了班次就直接排进今天的那个班；没给就留在待归纳区等下一次排班。"""
+    if slot == "auto":
+        slot = _auto_slot()
     if slot not in SLOTS or not problem_id:
-        return
+        return None
     today = scheduler.today_str()
     exists = c.execute(
         "SELECT 1 FROM daily_plan WHERE plan_date=? AND problem_id=?", (today, problem_id)
     ).fetchone()
     if exists:
-        return
+        return None
     c.execute(
         "INSERT INTO daily_plan(plan_date, slot, problem_id) VALUES(?,?,?)",
         (today, slot, problem_id),
     )
+    return slot
 
 
 def _active_checks(c: sqlite3.Connection):
