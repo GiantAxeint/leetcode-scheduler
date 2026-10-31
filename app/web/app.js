@@ -894,6 +894,25 @@ async function loadSettings() {
   const s = await api('/settings');
   const st = s.settings;
   const checks = await api('/checks');
+  // 桌面版才有这两项；浏览器打开时后端返回 mode='headless'，面板降级为只读
+  const desktop = await api('/desktop/state');
+  const closeOpts = [['tray', '缩进托盘，后台继续跑'], ['exit', '直接退出程序']]
+    .map(([v, t]) => `<option value="${v}"${desktop.close_action === v ? ' selected' : ''}>${t}</option>`)
+    .join('');
+  const desktopPanel = `
+    <div class="panel" style="margin-bottom:16px">
+      <h3>桌面程序</h3>
+      <div class="cap">${desktop.mode === 'desktop'
+        ? '当前运行在桌面窗口里：点 X 默认只是缩到托盘，程序还在后台跑'
+        : '当前是网页模式（浏览器打开），下面两项只对桌面版生效'}</div>
+      <label class="field"><span>点窗口关闭按钮时</span>
+        <select id="s-close"${desktop.mode === 'desktop' ? '' : ' disabled'}>${closeOpts}</select></label>
+      <label class="row" style="gap:8px;align-items:center;margin-top:10px">
+        <input id="s-autostart" type="checkbox" style="width:auto"${desktop.autostart ? ' checked' : ''}${desktop.mode === 'desktop' ? '' : ' disabled'}>
+        <span>开机自启（开机后只进托盘，不弹窗）</span>
+      </label>
+      <button class="btn primary" style="margin-top:12px" onclick="saveDesktop()"${desktop.mode === 'desktop' ? '' : ' disabled'}>保存</button>
+    </div>`;
   const checkRows = checks.map((c) => `
     <div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)">
       <span style="flex:1">${esc(c.name)} <span class="muted">${esc(c.hint || '')}</span></span>
@@ -932,6 +951,7 @@ async function loadSettings() {
         <button class="btn" onclick="addCheck()">加一项</button>
       </div>
     </div>
+    ${desktopPanel}
     <div class="panel">
       <h3>数据目录</h3><div class="cap">整个目录可以搬到任何盘，搬完在这里改一下就行</div>
       <div class="row">
@@ -963,6 +983,16 @@ async function saveTotals() {
     body: { total_easy: $('#s-te').value, total_medium: $('#s-tm').value, total_hard: $('#s-th').value },
   });
   toast('已保存');
+}
+
+async function saveDesktop() {
+  // 关窗行为进 settings 表（桌面壳下次关窗时读），自启进注册表
+  await api('/settings', { method: 'PUT', body: { close_action: $('#s-close').value } });
+  const r = await api('/desktop/autostart', {
+    method: 'POST',
+    body: { enabled: $('#s-autostart').checked },
+  });
+  toast(r.autostart ? '已保存：开机自启已开启' : '已保存：开机自启已关闭');
 }
 
 async function addCheck() {

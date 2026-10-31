@@ -22,6 +22,7 @@ DEFAULT_SETTINGS = {
     "total_easy": "1094",         # 题库总数（用于进度环，可改）
     "total_medium": "2334",
     "total_hard": "1056",
+    "close_action": "tray",       # 桌面版关窗行为：tray=缩托盘 / exit=直接退出
 }
 
 DEFAULT_CHECKS = [

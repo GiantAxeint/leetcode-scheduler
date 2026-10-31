@@ -12,7 +12,7 @@ from pathlib import Path
 from flask import Flask, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException
 
-from . import config, db, scheduler, state
+from . import config, db, host, scheduler, state
 
 # 每个数据根只初始化一次；否则两个并发请求同时建表会撞写锁
 _INIT_LOCK = threading.Lock()
@@ -66,8 +66,48 @@ def create_app(root: Path | None = None) -> Flask:
     # ---------- 给扩展用的探活 ----------
     @app.get("/api/health")
     def api_health():
-        return jsonify({"ok": True, "app": "刷题调度", "version": "0.2.0",
+        return jsonify({"ok": True, "app": "刷题调度", "version": "0.3.0",
+                        "mode": "desktop" if host.available("show_window") else "headless",
                         "data_root": str(app.config["ROOT"])})
+
+    # ---------- 桌面壳联动 ----------
+    @app.post("/api/ui/show")
+    def api_ui_show():
+        """单实例唤起：第二次双击 exe 时打这里，把已有窗口叫到前面而不是起新进程。"""
+        try:
+            host.call("show_window")
+            return jsonify({"ok": True})
+        except host.HostUnavailable:
+            return jsonify({"ok": False, "error": "当前不是桌面模式"}), 501
+
+    @app.get("/api/desktop/state")
+    def api_desktop_state():
+        desktop = host.available("show_window")
+        out = {
+            "mode": "desktop" if desktop else "headless",
+            "close_action": "tray",
+            "autostart": False,
+        }
+        if desktop:
+            # 这两项只有桌面壳做得到，headless 下保持上面的默认值
+            try:
+                out["close_action"] = host.call("close_action")
+            except host.HostUnavailable:
+                pass
+            try:
+                out["autostart"] = host.call("autostart_enabled")
+            except host.HostUnavailable:
+                pass
+        return jsonify(out)
+
+    @app.post("/api/desktop/autostart")
+    def api_desktop_autostart():
+        b = request.get_json(force=True, silent=True) or {}
+        enabled = bool(b.get("enabled"))
+        try:
+            return jsonify({"autostart": host.call("autostart_set", enabled)})
+        except host.HostUnavailable:
+            return jsonify({"error": "当前不是桌面模式"}), 501
 
     @app.get("/api/lookup")
     def api_lookup():
