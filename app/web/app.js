@@ -247,6 +247,7 @@ async function loadToday() {
 
 /* 单独拆出来：抽屉切换 tab 时只要重画，不必再请求一次 /today */
 function renderToday() {
+  if (!TODAY) return;   // 页面刚打开、/today 还没回来时，直接画会抛错
   const labels = { morning: '早班', noon: '午班', evening: '晚班' };
   const caps = {
     morning: '今天新录的题，先自己做',
@@ -345,14 +346,24 @@ function drawerCard(p) {
 
 async function loadDrawer() {
   DRAWER_LOADING = true;
-  renderToday();
+  if (!TODAY) {
+    // 刚打开程序就点题库：/today 还在路上，`renderToday` 会炸在 TODAY.slots 上，
+    // 结果就是「点了没反应、按钮文字不变、LOADING 卡死」，非得切一次 tab 才恢复。
+    try {
+      await loadToday();
+    } catch (e) {
+      /* 拉不到就让下面的 finally 收尾，界面至少不会卡在加载中 */
+    }
+  }
   try {
+    if (TODAY) renderToday();
     DRAWER_ITEMS = (await api(DRAWER_URL[DRAWER_TAB])) || [];
   } catch (e) {
     DRAWER_ITEMS = [];
+  } finally {
+    DRAWER_LOADING = false;
+    if (TODAY) renderToday();
   }
-  DRAWER_LOADING = false;
-  renderToday();
 }
 
 async function toggleDrawer() {
