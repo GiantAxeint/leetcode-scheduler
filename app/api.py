@@ -94,12 +94,14 @@ def create_app(root: Path | None = None) -> Flask:
     def api_today():
         c = conn()
         today = scheduler.today_str()
+        recycled = scheduler.recycle_stale(c, today)
         scheduler.build_plan(c, today)
         rows = c.execute(
             """
             SELECT d.id AS plan_id, d.slot, d.done, d.problem_id,
                    p.title, p.leetcode_id, p.url, p.slug, p.difficulty,
                    p.stage, p.next_due, p.status,
+                   CAST(julianday(?) - julianday(p.next_due) AS INTEGER) AS overdue,
                    (SELECT GROUP_CONCAT(cc.title, '、') FROM card_problem cp
                     JOIN pattern_card cc ON cc.id = cp.card_id
                     WHERE cp.problem_id = p.id) AS cards
@@ -108,7 +110,7 @@ def create_app(root: Path | None = None) -> Flask:
             WHERE d.plan_date = ?
             ORDER BY CASE d.slot WHEN 'morning' THEN 0 WHEN 'noon' THEN 1 ELSE 2 END, d.id
             """,
-            (today,),
+            (today, today),
         ).fetchall()
         slots: dict[str, list] = {"morning": [], "noon": [], "evening": []}
         for r in rows:
@@ -117,6 +119,7 @@ def create_app(root: Path | None = None) -> Flask:
             {
                 "date": today,
                 "rest": not scheduler.is_workday(date.today()),
+                "recycled": recycled,
                 "gate": scheduler.gate(c),
                 "backlog": scheduler.backlog(c, today),
                 "slots": slots,

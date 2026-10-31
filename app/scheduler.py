@@ -103,7 +103,8 @@ def queue_order(conn: sqlite3.Connection, ids: list[int]) -> None:
     conn.commit()
 
 
-def refill(conn: sqlite3.Connection) -> int:
+def refill(conn: sqlite3.Connection, exclude: set[int] | None = None) -> int:
+    """在途空出几个名额，就从候补队头补几个（exclude 里的不补，避免刚回收又被拉回）。"""
     limit = db.get_int(conn, "queue_limit", 15)
     active = conn.execute(
         "SELECT COUNT(*) c FROM problem WHERE phase='active'"
@@ -111,19 +112,26 @@ def refill(conn: sqlite3.Connection) -> int:
     need = limit - active
     if need <= 0:
         return 0
+    cap = need + (len(exclude) if exclude else 0)
     rows = conn.execute(
         "SELECT id FROM problem WHERE phase='queued' "
         "ORDER BY COALESCE(order_no, 999999), id LIMIT ?",
-        (need,),
+        (cap,),
     ).fetchall()
+    filled = 0
     for r in rows:
+        if filled >= need:
+            break
+        if exclude and r["id"] in exclude:
+            continue
         conn.execute(
             "UPDATE problem SET phase='active', next_due=? WHERE id=?",
             (due_date(), r["id"]),
         )
-    if rows:
+        filled += 1
+    if filled:
         conn.commit()
-    return len(rows)
+    return filled
 
 
 def gate(conn: sqlite3.Connection) -> dict:
@@ -186,6 +194,25 @@ def build_plan(conn: sqlite3.Connection, today: str | None = None) -> None:
         rows,
     )
     conn.commit()
+
+
+def recycle_stale(conn: sqlite3.Connection, today: str | None = None, days: int = 7) -> int:
+    """逾期超过 N 天还没碰的题，退回候补，把在途名额让给新题。"""
+    today = today or today_str()
+    cutoff = (date.fromisoformat(today) - timedelta(days=days)).isoformat()
+    rows = conn.execute(
+        "SELECT id FROM problem WHERE phase='active' "
+        "AND next_due IS NOT NULL AND next_due < ?",
+        (cutoff,),
+    ).fetchall()
+    if not rows:
+        return 0
+    ids = {r["id"] for r in rows}
+    for pid in ids:
+        conn.execute("UPDATE problem SET phase='queued' WHERE id=?", (pid,))
+    conn.commit()
+    refill(conn, exclude=ids)
+    return len(ids)
 
 
 def backlog_problems(conn: sqlite3.Connection, today: str | None = None) -> list[sqlite3.Row]:

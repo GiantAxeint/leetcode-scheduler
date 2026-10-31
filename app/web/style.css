@@ -168,6 +168,8 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 }
 .badge.due { background: var(--amber-bg); color: var(--amber); }
 .badge.new { background: var(--green-bg); color: var(--green); }
+.badge.od1 { background: #fdf0d9; color: #8a5a00; }
+.badge.od2 { background: #fbe0e0; color: #a32d2d; }
 
 .btn {
   border: 1px solid var(--line); background: #fff; color: var(--text);

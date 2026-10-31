@@ -274,6 +274,8 @@ async function loadToday() {
       <h2 style="margin:0;font-size:16px;font-weight:500">当日任务</h2>
       <span class="muted">要复习的 + 今天新录的</span>
       <div class="spacer"></div>
+      ${TODAY.recycled
+        ? `<span class="muted" style="color:#8a5a00">${TODAY.recycled} 道题逾期超 7 天，已退回候补</span>` : ''}
       <span class="muted">共 ${total} 项 · ${TODAY.date}</span>
     </div>
     <div class="cols">${blocks}</div>
@@ -333,8 +335,12 @@ function bindPlanDrag() {
 function planItem(r) {
   const stage = r.stage || 0;
   const badge = stage ? `S${stage} · ${STAGE_LABEL[stage]}` : '新题';
+  const over = r.overdue || 0;
+  const overBadge = over > 0
+    ? `<span class="badge ${over >= 3 ? 'od2' : 'od1'}">逾期 ${over} 天</span>`
+    : '';
   return `<div class="item ${r.done ? 'done' : ''}" draggable="true" data-plan="${r.plan_id}">
-    <div class="t">${titleLink(r.title, r)}<span class="badge ${stage ? 'due' : 'new'}">${badge}</span></div>
+    <div class="t">${titleLink(r.title, r)}<span class="badge ${stage ? 'due' : 'new'}">${badge}</span>${overBadge}</div>
     <div class="m">${r.done ? '<span style="color:#3b6d11">✓ 已处理</span> · ' : ''}${
       r.leetcode_id ? 'LeetCode ' + r.leetcode_id : '未绑定题号'}${
       r.cards ? ' · ' + esc(r.cards) : ' · 未归题型'}</div>
