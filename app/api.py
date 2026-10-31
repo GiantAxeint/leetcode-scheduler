@@ -263,16 +263,49 @@ def create_app(root: Path | None = None) -> Flask:
         if not p:
             return jsonify({"error": "题目不存在"}), 404
 
-        last = c.execute(
-            "SELECT * FROM review_log WHERE problem_id=? AND result IN ('correct','wrong') "
-            "ORDER BY id DESC LIMIT 1",
-            (pid,),
-        ).fetchone()
-        if not last:
-            return jsonify({"error": "没有可撤回的判定"}), 400
         today = scheduler.today_str()
-        if (last["reviewed_at"] or "")[:10] != today:
-            return jsonify({"error": "只能撤回今天的判定"}), 400
+        last = c.execute(
+            "SELECT * FROM review_log WHERE problem_id=? "
+            "AND substr(reviewed_at, 1, 10)=? AND result IN ('correct','wrong') "
+            "ORDER BY id DESC LIMIT 1",
+            (pid, today),
+        ).fetchone()
+
+        if last is None:
+            # 没有「答对/未答对」，但还是可能被标成已处理：
+            # ① 细想弹窗里点了「跳过」（result='skip'，不改档位）
+            # ② 直接点了卡片的完成标记（daily_plan.done=1）
+            # 这两种都得能撤，否则用户会看到「已处理」却撤不回去。
+            skipped = c.execute(
+                "SELECT id FROM review_log WHERE problem_id=? "
+                "AND substr(reviewed_at, 1, 10)=? AND result='skip' "
+                "ORDER BY id DESC LIMIT 1",
+                (pid, today),
+            ).fetchone()
+            if skipped:
+                c.execute("DELETE FROM review_log WHERE id=?", (skipped["id"],))
+                c.execute(
+                    "UPDATE daily_plan SET done=0 WHERE plan_date=? AND problem_id=?",
+                    (today, pid),
+                )
+                c.commit()
+                return jsonify(
+                    {"ok": True, "undone": "skip", "stage": p["stage"],
+                     "next_due": p["next_due"], "phase": p["phase"]}
+                )
+
+            cur = c.execute(
+                "UPDATE daily_plan SET done=0 "
+                "WHERE plan_date=? AND problem_id=? AND done=1",
+                (today, pid),
+            )
+            if cur.rowcount == 0:
+                return jsonify({"error": "今天没有可撤回的判定"}), 400
+            c.commit()
+            return jsonify(
+                {"ok": True, "undone": "mark", "stage": p["stage"],
+                 "next_due": p["next_due"], "phase": p["phase"]}
+            )
 
         stage_back = last["stage_from"] if last["stage_from"] is not None else 0
         # 再往前一条判定的时间：撤回后 last_reviewed_at 要回退到它，
@@ -327,6 +360,7 @@ def create_app(root: Path | None = None) -> Flask:
         return jsonify(
             {
                 "ok": True,
+                "undone": "review",
                 "stage": row["stage"],
                 "next_due": row["next_due"],
                 "phase": row["phase"],

@@ -367,12 +367,12 @@ async function quickReview(pid, correct) {
 /* 撤回今天的判定：点错了用这个，档位和到期日一起回退到判定前 */
 async function undoReview(pid) {
   try {
-    await api('/review/undo', { method: 'POST', body: { problem_id: pid }, silent: true });
+    const r = await api('/review/undo', { method: 'POST', body: { problem_id: pid }, silent: true });
+    toast(r.undone === 'review' ? '已撤回，档位退回判定前' : '已撤回，可以重新判定');
   } catch (e) {
     toast(e.message);
     return;
   }
-  toast('已撤回，可以重新判定');
   loadToday();
   refreshGate();
 }
