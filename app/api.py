@@ -762,8 +762,6 @@ def _place_in_slot(c: sqlite3.Connection, problem_id: int, slot: str | None) -> 
     """给了班次就直接排进今天的那个班；没给就留在待归卡区等下一次排班。"""
     if slot not in SLOTS or not problem_id:
         return
-    if not scheduler.is_workday(date.today()):
-        return                      # 周末不排班，等周一
     today = scheduler.today_str()
     exists = c.execute(
         "SELECT 1 FROM daily_plan WHERE plan_date=? AND problem_id=?", (today, problem_id)

@@ -242,18 +242,6 @@ async function removeCard(cid, kind) {
 async function loadToday() {
   TODAY = await api('/today');
   renderGate(TODAY.gate, TODAY.backlog);
-  if (TODAY.rest) {
-    $('#view-today').innerHTML = `
-      <div class="panel" style="text-align:center;padding:64px 24px">
-        <h2 style="margin:0 0 10px;font-size:18px;font-weight:500">周末休息</h2>
-        <div class="muted" style="margin-bottom:18px">
-          复习只排在周一到周五。到期日落在周末的题，已经顺延到下周一。
-        </div>
-        <button class="btn" onclick="loadToday()">刷新</button>
-        <button class="btn ghost" onclick="CURRENT_VIEW='problems';location.hash='problems';render()">去看看题库</button>
-      </div>`;
-    return;
-  }
   const labels = { morning: '早班', noon: '午班', evening: '晚班' };
   const caps = {
     morning: '今天新录的题，先自己做',
@@ -272,7 +260,9 @@ async function loadToday() {
   $('#view-today').innerHTML = `
     <div class="row" style="margin-bottom:12px">
       <h2 style="margin:0;font-size:16px;font-weight:500">当日任务</h2>
-      <span class="muted">要复习的 + 今天新录的</span>
+      <span class="muted">${TODAY.rest
+        ? '周末不自动排到期复习（顺延到周一），你自己加进班的题照常记录'
+        : '要复习的 + 今天新录的'}</span>
       <div class="spacer"></div>
       ${TODAY.recycled
         ? `<span class="muted" style="color:#8a5a00">${TODAY.recycled} 道题逾期超 7 天，已退回候补</span>` : ''}
