@@ -153,7 +153,7 @@ def create_app(root: Path | None = None) -> Flask:
                     WHERE cp.problem_id = p.id) AS cards
             FROM daily_plan d
             JOIN problem p ON p.id = d.problem_id
-            WHERE d.plan_date = ?
+            WHERE d.plan_date = ? AND p.phase = 'active'
             ORDER BY CASE d.slot WHEN 'morning' THEN 0 WHEN 'noon' THEN 1 ELSE 2 END, d.id
             """,
             (today, today, today),
@@ -572,12 +572,18 @@ def create_app(root: Path | None = None) -> Flask:
     def api_problems():
         c = conn()
         st = request.args.get("status")
-        q = "SELECT * FROM problem"
+        q = (
+            "SELECT p.*, "
+            "(SELECT GROUP_CONCAT(cc.title, '、') FROM card_problem cp "
+            " JOIN pattern_card cc ON cc.id = cp.card_id "
+            " WHERE cp.problem_id = p.id) AS cards "
+            "FROM problem p"
+        )
         args: list = []
         if st:
-            q += " WHERE status=?"
+            q += " WHERE p.status=?"
             args.append(st)
-        q += " ORDER BY id DESC LIMIT 300"
+        q += " ORDER BY p.id DESC LIMIT 300"
         return jsonify([dict(r) for r in c.execute(q, args)])
 
     @app.get("/api/problems/<int:pid>")
