@@ -120,9 +120,66 @@ function renderGate(g, backlog) {
           title="正在复习的不同题目，同一题多次复习算 1">在途 ${g.active}/${g.active_limit}</span>
     <span class="chip" onclick="openList('queued')" title="还没轮到的题，出池一个补一个">候补 ${g.queued}</span>
     <span class="chip" onclick="openList('inbox')" title="还没归到题型上的题">待归纳 ${g.inbox}</span>
-    <span class="chip ${backlog > 0 ? 'warn' : ''}" onclick="openList('backlog')"
-          title="今天到期但没排进当日任务">积压 ${backlog}</span>`;
+    <span class="chip" onclick="openList('done')"
+          title="彻底掌握了，不再参与复习">已成 ${g.done || 0}</span>`;
 }
+
+/* 右键菜单：把一道题放进任意队列 */
+let MENU_EL = null;
+
+function closeMenu() {
+  if (MENU_EL) {
+    MENU_EL.remove();
+    MENU_EL = null;
+  }
+}
+
+function showMenu(ev, pid, phase) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  closeMenu();
+  const opts = [
+    { k: 'active', t: '放进在途' },
+    { k: 'queued', t: '放进候补' },
+    { k: 'done', t: '标记已成' },
+    { k: 'delete', t: '删除' },
+  ];
+  const el = document.createElement('div');
+  el.className = 'ctxmenu';
+  el.innerHTML = opts.map((o) => {
+    const off = o.k === phase ? ' off' : '';
+    const danger = o.k === 'delete' ? ' danger' : '';
+    const act = o.k === phase ? '' : ` onclick="menuAction(${pid},'${o.k}')"`;
+    return `<div class="ctxitem${off}${danger}"${act}>${o.t}</div>`;
+  }).join('');
+  document.body.appendChild(el);
+  const w = 140, h = 40 * opts.length;
+  el.style.left = Math.min(ev.clientX, window.innerWidth - w - 8) + 'px';
+  el.style.top = Math.min(ev.clientY, window.innerHeight - h - 8) + 'px';
+  MENU_EL = el;
+}
+
+async function menuAction(pid, kind) {
+  closeMenu();
+  if (kind === 'delete') {
+    delProblem(pid);
+    return;
+  }
+  try {
+    await api(`/problems/${pid}/phase`, { method: 'PUT', body: { phase: kind }, silent: true });
+  } catch (e) {
+    toast(e.message);
+    return;
+  }
+  toast({ active: '已放进在途', queued: '已放进候补', done: '已标记为已成，不再复习' }[kind]);
+  refreshGate();
+  if (CURRENT_VIEW === 'today') loadToday();
+  else if (CURRENT_VIEW === 'problems') loadProblems();
+  else render();
+}
+
+document.addEventListener('click', closeMenu);
+document.addEventListener('scroll', closeMenu, true);
 
 /* 点状态条看清单 */
 async function openList(kind) {
@@ -132,6 +189,34 @@ async function openList(kind) {
     inbox: { title: '待归纳题型区', url: '/problems?status=inbox' },
     backlog: { title: '积压 · 今天没排下的', url: '/backlog' },
   }[kind];
+  if (kind === 'done') {
+    const all = await api('/problems');
+    const done = all.filter((p) => p.phase === 'done');
+    const groups = new Map();
+    done.forEach((p) => {
+      const key = p.cards || '未归题型';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(p);
+    });
+    const blocks = [...groups.entries()].map(([name, list]) => `
+      <div class="panel" style="margin-bottom:12px">
+        <h3 style="margin-bottom:8px">${esc(name)} <span class="muted">${list.length} 道</span></h3>
+        ${list.map((p) => `
+          <div class="recent-row" oncontextmenu="showMenu(event,${p.id},'${p.phase}')">
+            <span>${titleLink(p.title, p)}
+              <span class="muted">${p.leetcode_id ? '#' + p.leetcode_id : ''}</span></span>
+            <span class="when">${p.stage ? 'S' + p.stage : '新题'}</span>
+          </div>`).join('')}
+      </div>`).join('');
+    modal(`<h2 style="margin:0 0 4px;font-size:17px;font-weight:500">已成 · 彻底掌握的题</h2>
+      <div class="cap">按题型分组。右键任意一行，可以放回在途或候补。</div>
+      ${blocks || '<div class="muted" style="padding:20px 4px">还没有标记为已成的题</div>'}
+      <div class="row end" style="margin-top:14px">
+        <button class="btn" onclick="closeModal()">关闭</button>
+      </div>`);
+    return;
+  }
+
   const rows = await api(meta.url);
 
   if (kind === 'queued') {
@@ -519,7 +604,8 @@ function planItem(r) {
   // 一天只判一次：判定过就把三个按钮锁掉，否则连点会一路 0→2→3→4 把档位推飞
   const settled = !!(r.done || r.reviewed_today);
   const lock = settled ? ' disabled' : '';
-  return `<div class="item ${settled ? 'done' : ''}" draggable="true" data-plan="${r.plan_id}">
+  return `<div class="item ${settled ? 'done' : ''}" draggable="true" data-plan="${r.plan_id}"
+       oncontextmenu="showMenu(event,${r.problem_id},'${r.phase || 'active'}')">
     <div class="t">${titleLink(r.title, r)}<span class="badge ${stage ? 'due' : 'new'}">${badge}</span>${overBadge}</div>
     <div class="m">${settled ? '<span style="color:#3b6d11">✓ 已处理</span> · ' : ''}${
       r.leetcode_id ? 'LeetCode ' + r.leetcode_id : '未绑定题号'}${
@@ -754,7 +840,7 @@ function cardProbRows(cid, probs) {
     return '<div class="muted" style="padding:10px 2px">还没有题，点下面的按钮加</div>';
   }
   const rows = probs.map((p) => `
-    <tr>
+    <tr oncontextmenu="showMenu(event,${p.id},'${p.phase || 'active'}')">
       <td>${p.leetcode_id || ''}</td>
       <td>${titleLink(p.title, p)}</td>
       <td>${p.difficulty
@@ -867,13 +953,15 @@ function autoSlot() {
 async function loadProblems() {
   const [inbox, all] = await Promise.all([api('/problems?status=inbox'), api('/problems')]);
   const inboxRows = inbox.map((p) => `
-    <tr><td>${p.leetcode_id || ''}</td>
+    <tr oncontextmenu="showMenu(event,${p.id},'${p.phase || 'active'}')">
+    <td>${p.leetcode_id || ''}</td>
     <td>${titleLink(p.title, p)}</td>
     <td><button class="btn ghost" onclick="pickCard(${p.id})">归题型</button></td>
     <td><button class="btn ghost" onclick="delProblem(${p.id})">删除</button></td></tr>`).join('');
   const PHASE = { active: '在途', queued: '候补', done: '完成' };
   const allRows = all.slice(0, 100).map((p) => `
-    <tr><td>${p.leetcode_id || ''}</td>
+    <tr oncontextmenu="showMenu(event,${p.id},'${p.phase || 'active'}')">
+    <td>${p.leetcode_id || ''}</td>
     <td>${titleLink(p.title, p)}</td>
     <td>${p.difficulty
       ? `<span class="dif ${diffClass(p.difficulty).replace('d-', '')}">${esc(p.difficulty)}</span>`

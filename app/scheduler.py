@@ -162,11 +162,15 @@ def gate(conn: sqlite3.Connection) -> dict:
     inbox = conn.execute(
         "SELECT COUNT(*) c FROM problem WHERE status='inbox' AND phase<>'done'"
     ).fetchone()["c"]
+    done = conn.execute(
+        "SELECT COUNT(*) c FROM problem WHERE phase='done'"
+    ).fetchone()["c"]
     return {
         "active": active,
         "active_limit": limit,
         "queued": queued,
         "inbox": inbox,
+        "done": done,
         "can_add": active < limit,
         "can_add_card": True,
         "can_add_problem": True,

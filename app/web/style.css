@@ -369,3 +369,20 @@ pre.code {
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
 th { color: var(--sub); font-weight: 500; font-size: 12px; }
+
+/* 右键菜单 */
+.ctxmenu {
+  position: fixed; z-index: 2147483000;
+  background: #fff; border: 1px solid var(--line);
+  border-radius: 8px; padding: 4px; min-width: 132px;
+  box-shadow: 0 8px 24px rgba(20, 20, 18, .14);
+}
+.ctxitem {
+  padding: 8px 12px; font-size: 13px; border-radius: 6px;
+  cursor: pointer; white-space: nowrap;
+}
+.ctxitem:hover { background: #f2f1ec; }
+.ctxitem.off { color: #b9b7ae; cursor: default; }
+.ctxitem.off:hover { background: transparent; }
+.ctxitem.danger { color: #a32d2d; }
+.ctxitem.danger:hover { background: #fbe9e9; }

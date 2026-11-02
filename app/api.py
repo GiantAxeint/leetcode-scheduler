@@ -144,7 +144,7 @@ def create_app(root: Path | None = None) -> Flask:
             """
             SELECT d.id AS plan_id, d.slot, d.done, d.problem_id,
                    p.title, p.leetcode_id, p.url, p.slug, p.difficulty,
-                   p.stage, p.next_due, p.status,
+                   p.stage, p.next_due, p.status, p.phase,
                    CAST(julianday(?) - julianday(p.next_due) AS INTEGER) AS overdue,
                    (p.last_reviewed_at IS NOT NULL
                     AND substr(p.last_reviewed_at, 1, 10) = ?) AS reviewed_today,
@@ -626,6 +626,42 @@ def create_app(root: Path | None = None) -> Flask:
         ids = [int(x) for x in (b.get("ids") or [])]
         scheduler.queue_order(c, ids)
         return jsonify({"ok": True, "count": len(ids)})
+
+    @app.put("/api/problems/<int:pid>/phase")
+    def api_problem_phase(pid: int):
+        """手动把题放进某个队列：active 在途 / queued 候补 / done 已成。"""
+        c = conn()
+        b = request.get_json(force=True) or {}
+        phase = b.get("phase")
+        if phase not in ("active", "queued", "done"):
+            return jsonify({"error": "phase 只能是 active / queued / done"}), 400
+        row = c.execute("SELECT phase FROM problem WHERE id=?", (pid,)).fetchone()
+        if not row:
+            return jsonify({"error": "题目不存在"}), 404
+        if phase == "active":
+            g_ = scheduler.gate(c)
+            if not g_.get("can_add") and row["phase"] != "active":
+                return jsonify({"error": "在途已满，先解决或移出一题"}), 409
+            c.execute(
+                "UPDATE problem SET phase='active', next_due=? WHERE id=?",
+                (scheduler.due_date(), pid),
+            )
+        elif phase == "queued":
+            nxt = c.execute(
+                "SELECT COALESCE(MAX(order_no), 0) + 1 m FROM problem WHERE phase='queued'"
+            ).fetchone()["m"]
+            c.execute(
+                "UPDATE problem SET phase='queued', order_no=?, next_due=NULL WHERE id=?",
+                (nxt, pid),
+            )
+        else:
+            c.execute(
+                "UPDATE problem SET phase='done', next_due=NULL WHERE id=?", (pid,)
+            )
+        c.commit()
+        if row["phase"] == "active" and phase != "active":
+            scheduler.refill(c)
+        return jsonify({"ok": True, "phase": phase, "gate": scheduler.gate(c)})
 
     @app.post("/api/problems/<int:pid>/activate")
     def api_problem_activate(pid: int):
