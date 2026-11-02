@@ -957,8 +957,9 @@ def create_app(root: Path | None = None) -> Flask:
             years.insert(0, this_year)
 
         recent = c.execute(
-            "SELECT r.reviewed_at, r.problem_id, p.title, p.difficulty FROM review_log r "
-            "JOIN problem p ON p.id = r.problem_id WHERE r.result='correct' "
+            "SELECT r.reviewed_at, r.problem_id, r.result, p.title, p.difficulty "
+            "FROM review_log r JOIN problem p ON p.id = r.problem_id "
+            "WHERE r.result IN ('correct','wrong') "
             "ORDER BY r.reviewed_at DESC LIMIT 12"
         ).fetchall()
 

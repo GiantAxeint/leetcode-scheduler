@@ -386,3 +386,7 @@ th { color: var(--sub); font-weight: 500; font-size: 12px; }
 .ctxitem.off:hover { background: transparent; }
 .ctxitem.danger { color: #a32d2d; }
 .ctxitem.danger:hover { background: #fbe9e9; }
+
+/* 最近处理的结果标记 */
+.badge.okb { background: #e4f0dc; color: #3b6d11; }
+.badge.badb { background: #fbe0e0; color: #a32d2d; }

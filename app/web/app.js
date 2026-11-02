@@ -1123,10 +1123,11 @@ async function loadStats() {
     ? s.recent_pass.map((r) => `
       <div class="recent-row">
         <span>${titleLink(r.title, { difficulty: r.difficulty, leetcode_id: null })}
-        <span class="muted">${r.stage_to ? 'S' + r.stage_to : ''}</span></span>
+        <span class="badge ${r.result === 'correct' ? 'okb' : 'badb'}">${
+          r.result === 'correct' ? '答对' : '未答对'}</span></span>
         <span class="when">${relTime(r.reviewed_at)}</span>
       </div>`).join('')
-    : '<div class="muted" style="padding:14px 4px">这年还没有答对记录</div>';
+    : '<div class="muted" style="padding:14px 4px">还没有处理记录</div>';
 
   const yearOpts = (s.years || []).map((y) =>
     `<option value="${y}" ${y === cs.year ? 'selected' : ''}>${y} 年</option>`).join('');
@@ -1171,7 +1172,7 @@ async function loadStats() {
     </div>
 
     <div class="panel" style="margin-bottom:16px">
-      <h3>最近答对</h3><div class="cap">判定为答对的题，最近的在前</div>
+      <h3>最近处理</h3><div class="cap">最近的判定记录，答对未答对都算</div>
       ${recent}
     </div>
 
