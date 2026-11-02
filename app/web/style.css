@@ -238,6 +238,13 @@ input, textarea, select {
   padding: 7px 10px; background: #fff; width: 100%;
 }
 textarea { resize: vertical; min-height: 64px; line-height: 1.6; }
+/* 骨架代码：默认给足高度，不然只看得见五六行；行数多时自动撑开，可手动往下拖 */
+textarea.code-edit {
+  min-height: 340px; max-height: 62vh;
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 13px; line-height: 1.65;
+  tab-size: 4; white-space: pre; overflow: auto;
+}
 label.field { display: block; margin-bottom: 12px; }
 label.field > span { display: block; font-size: 12px; color: var(--sub); margin-bottom: 4px; }
 
@@ -252,6 +259,7 @@ label.field > span { display: block; font-size: 12px; color: var(--sub); margin-
   background: var(--panel); border-radius: 14px; padding: 24px;
   width: min(680px, 92vw); max-height: 86vh; overflow: auto;
 }
+.modal-box.wide { width: min(960px, 94vw); }   /* 带代码编辑的弹窗 */
 
 .hidden { display: none; }
 .toast {

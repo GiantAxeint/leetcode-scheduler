@@ -64,9 +64,34 @@ function toast(msg) {
   t._timer = setTimeout(() => t.classList.add('hidden'), 2400);
 }
 
-function modal(html) {
-  $('#modal-box').innerHTML = html;
+function modal(html, wide = false) {
+  const box = $('#modal-box');
+  box.classList.toggle('wide', !!wide);   // 代码类弹窗要横向空间
+  box.innerHTML = html;
   $('#modal').classList.remove('hidden');
+}
+
+/* 骨架代码编辑：默认给足高度，行数多的自动撑开（封顶 62vh），还能手动往下拖 */
+function fitCodeHeight() {
+  const el = $('#f-code');
+  if (!el) return;
+  const lines = (el.value || '').split('\n').length;
+  const want = Math.max(340, lines * 22 + 30);
+  el.style.height = Math.min(Math.round(window.innerHeight * 0.62), want) + 'px';
+}
+
+/* textarea 里 Tab 默认是切焦点，写代码时很碍事，改成插 4 个空格 */
+function bindCodeTab() {
+  const el = $('#f-code');
+  if (!el) return;
+  el.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const s = el.selectionStart;
+    const t = el.selectionEnd;
+    el.value = el.value.slice(0, s) + '    ' + el.value.slice(t);
+    el.selectionStart = el.selectionEnd = s + 4;
+  });
 }
 function closeModal() {
   $('#modal').classList.add('hidden');
@@ -709,7 +734,7 @@ async function openCardEditor(id, attachProblem) {
     <label class="field"><span>触发信号（最重要：题干出现什么就该想到它）</span>
       <textarea id="f-trigger" placeholder="连续子数组 + 求最短/最长 + 有单调性">${esc(c.trigger_signals || '')}</textarea></label>
     <label class="field"><span>一句话本质</span><input id="f-essence" value="${esc(c.essence || '')}" placeholder="用窗口吃掉不满足的部分"></label>
-    <label class="field"><span>骨架代码</span><textarea id="f-code" style="min-height:120px;font-family:Consolas,monospace">${esc(c.skeleton_code || '')}</textarea></label>
+    <label class="field"><span>骨架代码</span><textarea id="f-code" class="code-edit" spellcheck="false" placeholder="写到能照着还原思路的程度，不必是可运行代码">${esc(c.skeleton_code || '')}</textarea></label>
     ${id ? `
     <div class="cap" style="margin:18px 0 8px">这个题型下的题 · 共 ${(d.problems || []).length} 道</div>
     <div id="card-prob-list">${cardProbRows(id, d.problems || [])}</div>
@@ -719,7 +744,9 @@ async function openCardEditor(id, attachProblem) {
       <div class="spacer"></div>
       <button class="btn" onclick="closeModal()">取消</button>
       <button class="btn primary" onclick="saveCard(${id || 'null'},${attachProblem || 'null'})">保存</button>
-    </div>`);
+    </div>`, true);
+  fitCodeHeight();
+  bindCodeTab();
 }
 
 function cardProbRows(cid, probs) {
