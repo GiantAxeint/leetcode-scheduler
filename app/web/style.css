@@ -373,8 +373,12 @@ body.wall-on .item,
 body.wall-on .pcard,
 body.wall-on .drawer,
 body.wall-on .ditem,
-body.wall-on .cal-cell,
 body.wall-on .modal-box {
+  background: rgba(255, 255, 255, .84);
+  backdrop-filter: blur(10px);
+}
+/* 有题量分档的格子保留自己的颜色，别被半透明白盖掉 */
+body.wall-on .cal-cell:not(.q1):not(.q2):not(.q3) {
   background: rgba(255, 255, 255, .84);
   backdrop-filter: blur(10px);
 }
@@ -393,14 +397,16 @@ body.wall-on .top {
 .cal-cell.empty { border-color: transparent; background: transparent; }
 .cal-cell.has { background: #fbfbf7; }
 .cal-cell.today { border-color: var(--blue); }
-.cal-cell.over { background: #fdf3f3; border-color: #f0cfcf; }
+/* 题量分档，整格变色：≤容量 绿，≤2 倍 褐，再多 红 */
+.cal-cell.q1 { background: #e8f5e9; border-color: #c8e6c9; }
+.cal-cell.q2 { background: #f7eeda; border-color: #e3d2ad; }
+.cal-cell.q3 { background: #fbe3e3; border-color: #eebdbd; }
 /* 日期数字原来太浅，扫一眼找不到；加深到接近正文 */
 .cal-cell .cal-d { font-size: 12px; color: #4a4843; }
 .cal-cell .cal-n { font-size: 17px; font-weight: 600; margin-top: 2px; }
-/* 题量分档上色：≤容量 绿，≤2 倍 褐，再多 深红 */
-.cal-cell.q1 .cal-n { color: #2f7d32; }
-.cal-cell.q2 .cal-n { color: #8a5300; }
-.cal-cell.q3 .cal-n { color: #a31515; }
+.cal-cell.q1 .cal-n { color: #1f6b23; }
+.cal-cell.q2 .cal-n { color: #7a4a00; }
+.cal-cell.q3 .cal-n { color: #9c1414; }
 
 .cal-sel {
   width: auto; padding: 4px 8px; font-size: 13px;
