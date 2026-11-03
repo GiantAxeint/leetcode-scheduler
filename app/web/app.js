@@ -359,26 +359,19 @@ async function loadToday() {
 function renderToday() {
   if (!TODAY) return;   // 页面刚打开、/today 还没回来时，直接画会抛错
   const labels = { morning: '早班', noon: '午班', evening: '晚班' };
-  const caps = {
-    morning: '今天新录的题，先自己做',
-    noon: '到期的题，闭卷重做核心步骤',
-    evening: '只口述，不写码',
-  };
   const blocks = ['morning', 'noon', 'evening'].map((slot) => {
     const items = TODAY.slots[slot] || [];
     const body = items.length
       ? items.map(planItem).join('')
       : `<div class="muted" style="padding:12px 0">今天这班空的</div>`;
     return `<div class="panel dropzone" data-slot="${slot}"><h3>${labels[slot]}</h3>
-      <div class="cap">${caps[slot]}</div>${body}</div>`;
+      ${body}</div>`;
   }).join('');
   const total = Object.values(TODAY.slots).flat().length;
   $('#view-today').innerHTML = `
     <div class="row" style="margin-bottom:12px">
       <h2 style="margin:0;font-size:16px;font-weight:500">当日任务</h2>
-      <span class="muted">${TODAY.rest
-        ? '周末不自动排到期复习（顺延到周一），你自己加进班的题照常记录'
-        : '要复习的 + 今天新录的'}</span>
+      ${TODAY.rest ? '<span class="muted">周末不自动排期，顺延到周一</span>' : ''}
       <div class="spacer"></div>
       ${TODAY.recycled
         ? `<span class="muted" style="color:#8a5a00">${TODAY.recycled} 道题逾期超 7 天，已退回候补</span>` : ''}
