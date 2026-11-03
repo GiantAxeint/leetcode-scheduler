@@ -148,7 +148,7 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
   padding: 16px;
 }
 
-.panel h3 { margin: 0 0 4px; font-size: 13px; font-weight: 500; }
+.panel h3 { margin: 0 0 10px; font-size: 13px; font-weight: 500; }
 .panel .cap { color: var(--hint); font-size: 12px; margin-bottom: 12px; }
 
 .item {

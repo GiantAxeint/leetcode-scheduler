@@ -883,9 +883,6 @@ async function loadCards() {
       <button class="btn primary" onclick="openCardEditor(null)">新建题型</button>
       <span class="muted">共 ${cards.length} 个</span>
     </div>
-    <div class="cap" style="margin-bottom:14px">
-      题型是装题的框：写清触发信号和骨架，复习时当参考。它不排期，排期的是题。
-    </div>
     ${cards.length
       ? `<div class="card-grid">${grid}</div>`
       : '<div class="panel"><div class="muted" style="padding:20px 4px">还没有题型，先建一个</div></div>'}`;
@@ -1096,7 +1093,7 @@ async function loadProblems() {
     <td><button class="btn ghost" onclick="delProblem(${p.id})">删除</button></td></tr>`).join('');
   $('#view-problems').innerHTML = `
     <div class="panel" style="margin-bottom:16px">
-      <h3>录入一道题</h3><div class="cap">题号、标题、难度 + 排到哪个班，一次说完。周末录的题顺延到周一。</div>
+      <h3>录入一道题</h3>
       <div class="grid2">
         <label class="field"><span>LeetCode 题号</span><input id="p-id" placeholder="1"></label>
         <label class="field"><span>标题</span><input id="p-title" placeholder="Two Sum"></label>
@@ -1117,12 +1114,11 @@ async function loadProblems() {
     </div>
     <div class="panel" style="margin-bottom:16px">
       <h3>待归纳题型区 <span class="badge ${inbox.length ? 'due' : ''}">${inbox.length}</span></h3>
-      <div class="cap">录了但还没归到题型上的题。不设上限，但堆着不归纳等于没学</div>
       <table><thead><tr><th>题号</th><th>标题</th><th></th><th></th></tr></thead>
       <tbody>${inboxRows || '<tr><td colspan="4" class="muted">空的，很好</td></tr>'}</tbody></table>
     </div>
     <div class="panel">
-      <h3>全部题目</h3><div class="cap">最近 100 条</div>
+      <h3>全部题目</h3>
       <table><thead><tr><th>题号</th><th>标题</th><th>难度</th><th>归纳</th><th>阶段</th><th></th></tr></thead>
       <tbody>${allRows || '<tr><td colspan="6" class="muted">还没有题</td></tr>'}</tbody></table>
     </div>`;
@@ -1297,15 +1293,15 @@ async function loadStats() {
     </div>
 
     <div class="panel" style="margin-bottom:16px">
-      <h3>最近处理</h3><div class="cap">最近的判定记录，答对未答对都算</div>
+      <h3>最近处理</h3>
       ${recent}
     </div>
 
     <div class="cols">
-      <div class="panel"><h3>最近 14 天</h3><div class="cap">每天完成了几次</div>${days || '<div class="muted">还没数据</div>'}</div>
-      <div class="panel"><h3>各档通过率</h3><div class="cap">哪一档最容易答错</div>
+      <div class="panel"><h3>最近 14 天</h3>${days || '<div class="muted">还没数据</div>'}</div>
+      <div class="panel"><h3>各档通过率</h3>
         <table><thead><tr><th>档</th><th>次数</th><th>答对率</th></tr></thead><tbody>${stages || '<tr><td colspan="3" class="muted">—</td></tr>'}</tbody></table></div>
-      <div class="panel"><h3>答错的时候</h3><div class="cap">不会 / 想不到 / 写错</div>
+      <div class="panel"><h3>答错的时候</h3>
         <table><thead><tr><th>类型</th><th>次数</th></tr></thead><tbody>${errs || '<tr><td colspan="2" class="muted">—</td></tr>'}</tbody></table></div>
     </div>`;
 }
@@ -1460,7 +1456,6 @@ async function loadSettings() {
   const wallPanel = `
     <div class="panel" style="margin-bottom:16px">
       <h3>个性化</h3>
-      <div class="cap">背景壁纸。WE 的 scene / web 类要靠它自己的引擎渲染，取不过来，只能用 video / picture。</div>
       <div class="row">
         <button class="btn" onclick="pickWallFile('image')">选图片</button>
         <button class="btn" onclick="pickWallFile('video')">选视频</button>
@@ -1483,9 +1478,6 @@ async function loadSettings() {
   const desktopPanel = `
     <div class="panel" style="margin-bottom:16px">
       <h3>桌面程序</h3>
-      <div class="cap">${desktop.mode === 'desktop'
-        ? '当前运行在桌面窗口里：点 X 默认只是缩到托盘，程序还在后台跑'
-        : '当前是网页模式（浏览器打开），下面两项只对桌面版生效'}</div>
       <label class="field"><span>点窗口关闭按钮时</span>
         <select id="s-close"${desktop.mode === 'desktop' ? '' : ' disabled'}>${closeOpts}</select></label>
       <label class="row" style="gap:8px;align-items:center;margin-top:10px">
@@ -1501,7 +1493,7 @@ async function loadSettings() {
     </div>`).join('');
   $('#view-settings').innerHTML = `
     <div class="panel" style="margin-bottom:16px">
-      <h3>节奏</h3><div class="cap">改完立刻生效，不用重启</div>
+      <h3>节奏</h3>
       <div class="grid2">
         <label class="field"><span>每日总题数（新题 + 到期，早午晚班只是把总量切开）</span><input id="s-cap" type="number" min="1" max="30" value="${st.daily_capacity}"></label>
         <label class="field"><span>每天新题数（占早班）</span><input id="s-morning" type="number" min="0" max="10" value="${st.morning_new}"></label>
@@ -1515,7 +1507,7 @@ async function loadSettings() {
       <button class="btn primary" onclick="saveSettings()">保存</button>
     </div>
     <div class="panel" style="margin-bottom:16px">
-      <h3>题库总数</h3><div class="cap">只影响统计页那个进度环，随便改</div>
+      <h3>题库总数</h3>
       <div class="cols">
         <label class="field"><span>简单</span><input id="s-te" type="number" value="${st.total_easy}"></label>
         <label class="field"><span>中等</span><input id="s-tm" type="number" value="${st.total_medium}"></label>
@@ -1524,7 +1516,7 @@ async function loadSettings() {
       <button class="btn" onclick="saveTotals()">保存总数</button>
     </div>
     <div class="panel" style="margin-bottom:16px">
-      <h3>检验项</h3><div class="cap">数量、名称自己定；判定用通过率，所以增减不影响算法</div>
+      <h3>检验项</h3>
       ${checkRows || '<div class="muted">没有启用的检验项</div>'}
       <div class="row" style="margin-top:12px">
         <input id="c-name" placeholder="新检验项名称" style="flex:1">
@@ -1535,7 +1527,7 @@ async function loadSettings() {
     ${wallPanel}
     ${desktopPanel}
     <div class="panel">
-      <h3>数据目录</h3><div class="cap">整个目录可以搬到任何盘，搬完在这里改一下就行</div>
+      <h3>数据目录</h3>
       <div class="row">
         <input id="s-root" value="${esc(s.data_root)}" style="flex:1">
         <button class="btn" onclick="changeRoot()">迁移到此路径</button>
