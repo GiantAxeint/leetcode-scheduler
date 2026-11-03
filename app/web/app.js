@@ -740,6 +740,110 @@ async function skipReview() {
   loadToday();
 }
 
+/* ---------------- 日历 ---------------- */
+let CAL = { month: null, data: null };
+
+async function loadCalendar(month) {
+  if (month) CAL.month = month;
+  if (!CAL.month) {
+    // toISOString 是 UTC，晚上八点后会差一天，用本地日期
+    const base = (TODAY && TODAY.date) || new Date().toLocaleDateString('sv-SE');
+    CAL.month = base.slice(0, 7);
+  }
+  try {
+    CAL.data = await api('/calendar?month=' + CAL.month);
+  } catch (e) {
+    $('#view-calendar').innerHTML = `<div class="panel"><h3>日历加载失败</h3>
+      <pre class="code">${esc(e.message || e)}</pre></div>`;
+    return;
+  }
+  renderCalendar();
+}
+
+function stepMonth(delta) {
+  const [y, m] = CAL.month.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  loadCalendar(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+}
+
+function renderCalendar() {
+  const d = CAL.data;
+  if (!d) return;
+  const cap = d.capacity || 6;
+  const [y, m] = CAL.month.split('-').map(Number);
+  const pad = (new Date(y, m - 1, 1).getDay() + 6) % 7;   // 周一打头
+  const total = new Date(y, m, 0).getDate();
+
+  const head = ['一', '二', '三', '四', '五', '六', '日']
+    .map((w) => `<div class="cal-w">${w}</div>`).join('');
+
+  let cells = '';
+  for (let i = 0; i < pad; i++) cells += '<div class="cal-cell empty"></div>';
+  for (let day = 1; day <= total; day++) {
+    const iso = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const list = d.days[iso] || [];
+    const cls = ['cal-cell'];
+    if (iso === d.today) cls.push('today');
+    if (list.length) cls.push('has');
+    if (list.length > cap) cls.push('over');
+    cells += `<div class="${cls.join(' ')}" data-date="${iso}">
+      <div class="cal-d">${day}</div>
+      ${list.length ? `<div class="cal-n">${list.length}</div>` : ''}
+    </div>`;
+  }
+
+  $('#view-calendar').innerHTML = `
+    <div class="row" style="margin-bottom:14px">
+      <h2 style="margin:0;font-size:16px;font-weight:500">${y} 年 ${m} 月</h2>
+      <span class="muted">每天容量 ${cap} 题，超过标红</span>
+      <div class="spacer"></div>
+      <button class="btn ghost" onclick="stepMonth(-1)">上一月</button>
+      <button class="btn ghost" onclick="loadCalendar()">本月</button>
+      <button class="btn ghost" onclick="stepMonth(1)">下一月</button>
+    </div>
+    <div class="panel"><div class="cal-grid">${head}${cells}</div></div>
+    <div class="muted" style="margin-top:10px;font-size:12px">
+      只列在途题（候补不算）。数字是「那天到期几道」，实际排进班次还要看每日容量。
+    </div>
+    <div id="cal-tip" class="cal-tip" hidden></div>`;
+  bindCalTip();
+}
+
+function bindCalTip() {
+  const grid = $('#view-calendar .cal-grid');
+  const tip = $('#cal-tip');
+  if (!grid || !tip) return;
+
+  grid.addEventListener('mouseover', (e) => {
+    const cell = e.target.closest('.cal-cell[data-date]');
+    if (!cell) return;
+    const iso = cell.dataset.date;
+    const list = CAL.data.days[iso] || [];
+    if (!list.length) {
+      tip.hidden = true;
+      return;
+    }
+    const cap = CAL.data.capacity || 6;
+    tip.innerHTML = `<div class="cal-tip-h">${iso} · ${list.length} 道${
+      list.length > cap ? ' · 超载' : ''}</div>${
+      list.map((p) => `<div class="cal-tip-row">
+        <div>${titleLink(p.title, p)}</div>
+        <span class="muted">${[
+          p.leetcode_id ? '#' + p.leetcode_id : '',
+          p.stage ? 'S' + p.stage : '新题',
+          p.difficulty || '',
+        ].filter(Boolean).join(' · ')}</span>
+      </div>`).join('')}`;
+    tip.hidden = false;
+    const r = cell.getBoundingClientRect();
+    tip.style.left = Math.min(window.innerWidth - 320, Math.max(8, r.left)) + 'px';
+    tip.style.top = Math.min(
+      window.innerHeight - tip.offsetHeight - 10, r.bottom + 6
+    ) + 'px';
+  });
+  grid.addEventListener('mouseleave', () => { tip.hidden = true; });
+}
+
 /* ---------------- 题型卡 ---------------- */
 async function loadCards() {
   const cards = await api('/cards');
@@ -1218,12 +1322,12 @@ async function loadSettings() {
     <div class="panel" style="margin-bottom:16px">
       <h3>节奏</h3><div class="cap">改完立刻生效，不用重启</div>
       <div class="grid2">
+        <label class="field"><span>每日总题数（新题 + 到期，早午晚班只是把总量切开）</span><input id="s-cap" type="number" min="1" max="30" value="${st.daily_capacity}"></label>
+        <label class="field"><span>每天新题数（占早班）</span><input id="s-morning" type="number" min="0" max="10" value="${st.morning_new}"></label>
+        <label class="field"><span>答错时下一次间隔打几折（0.5 = 五折）</span><input id="s-lapse" type="number" step="0.05" min="0.1" max="1" value="${st.lapse_factor}"></label>
+        <label class="field"><span>间隔抖动（0.2 = ±20%，把同档位的题散开）</span><input id="s-fuzz" type="number" step="0.05" min="0" max="0.5" value="${st.interval_fuzz}"></label>
         <label class="field"><span>在途题目上限（当月要复习的不同题目）</span><input id="s-queue" type="number" value="${st.queue_limit}"></label>
         <label class="field"><span>每日时长上限（分钟）</span><input id="s-minutes" type="number" value="${st.daily_minutes}"></label>
-        <label class="field"><span>早班新题数</span><input id="s-morning" type="number" value="${st.morning_new}"></label>
-        <label class="field"><span>午班到期数</span><input id="s-noon" type="number" value="${st.noon_due}"></label>
-        <label class="field"><span>晚班到期数</span><input id="s-evening" type="number" value="${st.evening_due}"></label>
-        <label class="field"><span>答错时下一次间隔打几折（0.5 = 五折）</span><input id="s-lapse" type="number" step="0.05" min="0.1" max="1" value="${st.lapse_factor}"></label>
       </div>
       <label class="field"><span>间隔阶梯（档位基数，天数，逗号分隔）</span>
         <input id="s-intervals" value="${st.intervals.join(',')}"></label>
@@ -1260,12 +1364,12 @@ async function loadSettings() {
 
 async function saveSettings() {
   const body = {
-    queue_limit: $('#s-queue').value,
+    daily_capacity: $('#s-cap').value,
     morning_new: $('#s-morning').value,
-    noon_due: $('#s-noon').value,
-    evening_due: $('#s-evening').value,
-    daily_minutes: $('#s-minutes').value,
     lapse_factor: $('#s-lapse').value,
+    interval_fuzz: $('#s-fuzz').value,
+    queue_limit: $('#s-queue').value,
+    daily_minutes: $('#s-minutes').value,
     interval_days: $('#s-intervals').value,
   };
   await api('/settings', { method: 'PUT', body });
@@ -1314,7 +1418,7 @@ async function exportCards() {
 
 /* ---------------- 路由 ---------------- */
 const VIEWS = {
-  today: loadToday, cards: loadCards, problems: loadProblems,
+  today: loadToday, calendar: loadCalendar, cards: loadCards, problems: loadProblems,
   stats: loadStats, settings: loadSettings,
 };
 

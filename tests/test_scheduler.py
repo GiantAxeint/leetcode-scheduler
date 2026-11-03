@@ -161,11 +161,38 @@ def test_full_queue_stops_new_problems(conn):
 def test_backlog_counts_unplanned_due(conn):
     for i in range(5):
         _add_problem(conn, f"p{i}", stage=2, next_due=WORKDAY)
-    db.set_setting(conn, "noon_due", 1)
-    db.set_setting(conn, "evening_due", 1)
+    # 容量按天算：2 道排进班，剩下 3 道进积压
+    db.set_setting(conn, "daily_capacity", 2)
     db.set_setting(conn, "morning_new", 0)
     scheduler.build_plan(conn, WORKDAY)
     assert scheduler.backlog(conn, WORKDAY) == 3
+
+
+def test_plan_respects_daily_capacity(conn):
+    for i in range(10):
+        _add_problem(conn, f"d{i}", stage=2, next_due=WORKDAY)
+    for i in range(4):
+        _add_problem(conn, f"n{i}", stage=0, next_due=WORKDAY)
+    db.set_setting(conn, "daily_capacity", 6)
+    db.set_setting(conn, "morning_new", 2)
+    scheduler.build_plan(conn, WORKDAY)
+    rows = conn.execute(
+        "SELECT slot, COUNT(*) c FROM daily_plan WHERE plan_date=? GROUP BY slot", (WORKDAY,)
+    ).fetchall()
+    got = {r["slot"]: r["c"] for r in rows}
+    assert sum(got.values()) == 6          # 总量硬约束
+    assert got.get("morning") == 2         # 新题占早班
+    assert got.get("noon") == 2
+    assert got.get("evening") == 2         # 剩余 4 道均分给午、晚
+
+
+def test_fuzz_days_range():
+    # 固定种子才能断言区间；比例 0 时原样返回
+    assert scheduler.fuzz_days(7, 0) == 7
+    assert scheduler.fuzz_days(1, 0.2) == 1     # 1 天档不抖
+    for _ in range(200):
+        assert 2 <= scheduler.fuzz_days(3, 0.2) <= 4
+        assert 12 <= scheduler.fuzz_days(15, 0.2) <= 18
 
 
 def test_add_days_skips_weekend():

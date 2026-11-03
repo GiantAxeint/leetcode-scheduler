@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import sqlite3
 from datetime import date, timedelta
 
@@ -35,28 +36,43 @@ def add_days(n: int, base: str | None = None) -> str:
     return next_workday(d + timedelta(days=n)).isoformat()
 
 
-def advance(stage: int, correct: bool, lapse: float = 0.5) -> tuple[int, str | None, bool]:
+def fuzz_days(days: int, ratio: float = 0.0) -> int:
+    """给间隔加抖动，把同档位的题散到相邻几天，别全撞在同一天。
+
+    1 天档直接返回：往下抖变 0 没意义，往上抖等于跳过。
+    """
+    if ratio <= 0 or days <= 1:
+        return days
+    lo = max(1, round(days * (1 - ratio)))
+    hi = max(lo, round(days * (1 + ratio)))
+    return random.randint(lo, hi)
+
+
+def advance(stage: int, correct: bool, lapse: float = 0.5,
+            fuzz: float = 0.0) -> tuple[int, str | None, bool]:
     """返回 (新档位, 下次日期, 是否出池)。
 
     答对：0 → 2（首答答对直接进 3 天档），否则升一档；第 5 档再答对就出池。
     答错：退一档（最低 1 档），下一次间隔在该档基数上乘 lapse（默认打五折）。
+    fuzz：间隔抖动，作用在最终天数上，答对答错都加。
     """
     if correct:
         if stage >= len(INTERVALS):
             return len(INTERVALS), None, True
         new_stage = 2 if stage == 0 else stage + 1
-        return new_stage, add_days(INTERVALS[new_stage - 1]), False
+        return new_stage, add_days(fuzz_days(INTERVALS[new_stage - 1], fuzz)), False
 
     new_stage = max(1, stage - 1)
     days = max(1, round(INTERVALS[new_stage - 1] * lapse))
-    return new_stage, add_days(days), False
+    return new_stage, add_days(fuzz_days(days, fuzz)), False
 
 
-def advance_early(stage: int, correct: bool, original_due: str | None) -> tuple[int, str | None, bool]:
+def advance_early(stage: int, correct: bool, original_due: str | None,
+                  fuzz: float = 0.0) -> tuple[int, str | None, bool]:
     """提前复习（还没到期就自己加练）的推进规则。
 
-    答对：照常升一档，但下次日期取 max(新档推算, 原到期日)。
-          没这个兜底的话，原到期日被手动拉远时，「提前练」反而把复习提前了。
+    答对：照常升一档，但下次日期取 max(抖动后的新档推算, 原到期日)。
+          fuzz 必须在 max 之前做，否则会被原日期压回去，等于没抖。
     答错：档位和日期都不动 —— 多练一次不该被惩罚，这是用户明确要的。
     """
     if not correct:
@@ -64,7 +80,7 @@ def advance_early(stage: int, correct: bool, original_due: str | None) -> tuple[
     if stage >= len(INTERVALS):
         return len(INTERVALS), None, True
     new_stage = 2 if stage == 0 else stage + 1
-    planned = add_days(INTERVALS[new_stage - 1])
+    planned = add_days(fuzz_days(INTERVALS[new_stage - 1], fuzz))
     due = max(planned, original_due) if original_due else planned
     return new_stage, due, False
 
@@ -178,7 +194,11 @@ def gate(conn: sqlite3.Connection) -> dict:
 
 
 def build_plan(conn: sqlite3.Connection, today: str | None = None) -> None:
-    """当天计划只生成一次。周末不排班。"""
+    """当天计划只生成一次。周末不排班。
+
+    容量按「天」算：daily_capacity 决定一天总共排几道，早/午/晚只是把总量切开
+    —— 新题优先早班，剩下的名额由到期题补，再均分给午、晚。
+    """
     today = today or today_str()
     if not is_workday(date.fromisoformat(today)):
         return
@@ -187,9 +207,8 @@ def build_plan(conn: sqlite3.Connection, today: str | None = None) -> None:
     ).fetchone():
         return
 
-    n_new = db.get_int(conn, "morning_new", 2)
-    n_noon = db.get_int(conn, "noon_due", 2)
-    n_even = db.get_int(conn, "evening_due", 1)
+    cap = max(1, db.get_int(conn, "daily_capacity", 6))
+    n_new = min(db.get_int(conn, "morning_new", 2), cap)
 
     rows: list[tuple] = []
     used: set[int] = set()
@@ -199,16 +218,19 @@ def build_plan(conn: sqlite3.Connection, today: str | None = None) -> None:
         rows.append((today, "morning", None, r["id"]))
         used.add(r["id"])
 
+    # 新题不够时早班空着的位置交给到期题；其余均分，奇数时午班多担一道
+    room = cap - len(fresh)
+    plan_slots: list[str] = []
+    if room > 0:
+        plan_slots = ["morning"] * min(n_new - len(fresh), room)
+        rest = room - len(plan_slots)
+        if rest > 0:
+            noon = (rest + 1) // 2
+            plan_slots += ["noon"] * noon + ["evening"] * (rest - noon)
+
     due = [r for r in due_problems(conn, today) if r["id"] not in used]
-    for slot, need in (("morning", n_new - len(fresh)), ("noon", n_noon), ("evening", n_even)):
-        for r in due:
-            if need <= 0:
-                break
-            if r["id"] in used:
-                continue
-            rows.append((today, slot, None, r["id"]))
-            used.add(r["id"])
-            need -= 1
+    for slot, r in zip(plan_slots, due):
+        rows.append((today, slot, None, r["id"]))
 
     conn.executemany(
         "INSERT INTO daily_plan(plan_date, slot, card_id, problem_id) VALUES(?,?,?,?)",

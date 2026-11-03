@@ -15,7 +15,11 @@ DEFAULT_SETTINGS = {
     "daily_minutes": "90",        # 每日时长上限（分钟）
     "interval_days": "1,3,7,15,30",
     "lapse_factor": "0.5",        # 答错时下次间隔打几折
+    "daily_capacity": "6",        # 一天总共排几道（新题 + 到期），早午晚班只是把总量切开
+    "interval_fuzz": "0.2",       # 间隔抖动幅度 ±20%，把同档位的题散到相邻几天
     "morning_new": "2",
+    # 下面两个已废弃：容量统一由 daily_capacity 管。
+    # 保留键是为了不破坏老配置和交接文档里的引用，代码不再读取。
     "noon_due": "2",
     "evening_due": "1",
     "oral_mode": "1",             # 晚班口述模式开关

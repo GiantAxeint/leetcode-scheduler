@@ -174,6 +174,59 @@ def create_app(root: Path | None = None) -> Flask:
             }
         )
 
+    # ---------- 日历 ----------
+    @app.get("/api/calendar")
+    def api_calendar():
+        """按月聚合在途题的到期日，供日历视图。
+
+        只算 phase='active'：候补题的 next_due 虽然也在，但不参与排期，
+        算进去数字会虚高，日历就骗人了。
+        """
+        c = conn()
+        month = (request.args.get("month") or scheduler.today_str()[:7]).strip()
+        try:
+            y, m = (int(x) for x in month.split("-"))
+            if not 1 <= m <= 12:
+                raise ValueError
+        except (ValueError, TypeError):
+            return jsonify({"error": "month 格式应为 YYYY-MM"}), 400
+
+        start = f"{y:04d}-{m:02d}-01"
+        ny, nm = (y + 1, 1) if m == 12 else (y, m + 1)
+        end = f"{ny:04d}-{nm:02d}-01"
+
+        rows = c.execute(
+            """SELECT id, title, leetcode_id, slug, url, difficulty, stage, next_due
+               FROM problem
+               WHERE phase='active' AND next_due IS NOT NULL
+                 AND next_due >= ? AND next_due < ?
+               ORDER BY next_due, stage, id""",
+            (start, end),
+        ).fetchall()
+
+        days: dict[str, list] = {}
+        for r in rows:
+            days.setdefault(r["next_due"], []).append(
+                {
+                    "id": r["id"],
+                    "title": r["title"],
+                    "leetcode_id": r["leetcode_id"],
+                    "slug": r["slug"],
+                    "url": r["url"],
+                    "difficulty": r["difficulty"],
+                    "stage": r["stage"],
+                }
+            )
+
+        return jsonify(
+            {
+                "month": month,
+                "capacity": db.get_int(c, "daily_capacity", 6),
+                "today": scheduler.today_str(),
+                "days": days,
+            }
+        )
+
     # ---------- 复习（判的是题，不是卡） ----------
     @app.post("/api/review")
     def api_review():
@@ -209,13 +262,16 @@ def create_app(root: Path | None = None) -> Flask:
         # 提前复习（还没到期就自己加练）：规则跟到期复习不一样，
         # 由后端按 next_due 自动识别，前端不用传标志
         early = bool(p["next_due"]) and p["next_due"] > today
+        fuzz = db.get_float(c, "interval_fuzz", 0.2)
         if early:
             stage_to, next_due, out_pool = scheduler.advance_early(
-                stage_from, correct, p["next_due"]
+                stage_from, correct, p["next_due"], fuzz
             )
         else:
             lapse = db.get_float(c, "lapse_factor", 0.5)
-            stage_to, next_due, out_pool = scheduler.advance(stage_from, correct, lapse)
+            stage_to, next_due, out_pool = scheduler.advance(
+                stage_from, correct, lapse, fuzz
+            )
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         c.execute(
