@@ -410,6 +410,31 @@ body.wall-on .top {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
+/* ---------------- 动效 ---------------- */
+/* 轻微过冲就够，弹太狠显廉价。cubic-bezier 的 y2 > 1 是弹性的来源 */
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(10px) scale(.94); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(6px) scale(.982); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes veil-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.modal { animation: veil-in .16s ease both; }
+.modal-box { animation: pop-in .3s cubic-bezier(.34, 1.28, .64, 1) both; }
+
+/* 只在切页那一下播一次，判定后重绘不重播 —— 否则每点一次「答对」整列都会抖 */
+.view.fresh .item,
+.view.fresh .pcard,
+.view.fresh .ditem {
+  animation: card-in .32s cubic-bezier(.34, 1.22, .64, 1) both;
+}
+
 /* ---------------- 日历 ---------------- */
 .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
 .cal-w { text-align: center; font-size: 12px; color: var(--hint); padding-bottom: 2px; }

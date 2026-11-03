@@ -1586,16 +1586,31 @@ const VIEWS = {
   stats: loadStats, settings: loadSettings,
 };
 
+let FRESH_TIMER = null;
+
+/* 切页时给卡片播一次弹入。必须等数据回来、DOM 插好再挂类，否则播在空容器上 */
+function flashFresh() {
+  const host = $('#view-' + CURRENT_VIEW);
+  if (!host) return;
+  host.classList.remove('fresh');
+  void host.offsetWidth;          // 强制重排，让动画能重播
+  host.classList.add('fresh');
+  clearTimeout(FRESH_TIMER);
+  FRESH_TIMER = setTimeout(() => host.classList.remove('fresh'), 700);
+}
+
 function render() {
   $$('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === CURRENT_VIEW));
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + CURRENT_VIEW));
-  Promise.resolve(VIEWS[CURRENT_VIEW]()).catch((e) => {
-    const host = $('#view-' + CURRENT_VIEW);
-    if (host) {
-      host.innerHTML = `<div class="panel"><h3>这个页面出错了</h3>
+  Promise.resolve(VIEWS[CURRENT_VIEW]())
+    .then(flashFresh)
+    .catch((e) => {
+      const host = $('#view-' + CURRENT_VIEW);
+      if (host) {
+        host.innerHTML = `<div class="panel"><h3>这个页面出错了</h3>
         <pre class="code">${esc((e && e.stack) || e)}</pre></div>`;
-    }
-  });
+      }
+    });
   refreshGate();
 }
 
