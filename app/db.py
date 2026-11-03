@@ -27,6 +27,13 @@ DEFAULT_SETTINGS = {
     "total_medium": "2334",
     "total_hard": "1056",
     "close_action": "tray",       # 桌面版关窗行为：tray=缩托盘 / exit=直接退出
+    # 壁纸（个性化）
+    "wall_mode": "none",          # none | video | picture
+    "wall_kind": "video",         # 播放方式：video 播放 / picture 轮播
+    "wall_files": "[]",           # JSON 数组，存绝对路径；只放行这里列出的文件
+    "wall_title": "",
+    "wall_dim": "0.35",           # 白色遮罩强度，越大正文越清楚
+    "wall_blur": "0",
 }
 
 DEFAULT_CHECKS = [

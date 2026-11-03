@@ -784,7 +784,11 @@ function renderCalendar() {
     const list = d.days[iso] || [];
     const cls = ['cal-cell'];
     if (iso === d.today) cls.push('today');
-    if (list.length) cls.push('has');
+    if (list.length) {
+      cls.push('has');
+      // 题量分档：≤容量 绿，≤2 倍 褐，再多 深红
+      cls.push(list.length <= cap ? 'q1' : list.length <= cap * 2 ? 'q2' : 'q3');
+    }
     if (list.length > cap) cls.push('over');
     cells += `<div class="${cls.join(' ')}" data-date="${iso}">
       <div class="cal-d">${day}</div>
@@ -792,10 +796,20 @@ function renderCalendar() {
     </div>`;
   }
 
+  const years = [];
+  for (let yy = y - 3; yy <= y + 3; yy++) years.push(yy);
+  const yearOpts = years
+    .map((yy) => `<option value="${yy}"${yy === y ? ' selected' : ''}>${yy} 年</option>`)
+    .join('');
+  const monthOpts = Array.from({ length: 12 }, (_, i) => i + 1)
+    .map((mm) => `<option value="${mm}"${mm === m ? ' selected' : ''}>${mm} 月</option>`)
+    .join('');
+
   $('#view-calendar').innerHTML = `
     <div class="row" style="margin-bottom:14px">
-      <h2 style="margin:0;font-size:16px;font-weight:500">${y} 年 ${m} 月</h2>
-      <span class="muted">每天容量 ${cap} 题，超过标红</span>
+      <select id="cal-year" class="cal-sel" onchange="calJump()">${yearOpts}</select>
+      <select id="cal-month" class="cal-sel" onchange="calJump()">${monthOpts}</select>
+      <span class="muted">每天容量 ${cap} 题</span>
       <div class="spacer"></div>
       <button class="btn ghost" onclick="stepMonth(-1)">上一月</button>
       <button class="btn ghost" onclick="loadCalendar()">本月</button>
@@ -807,6 +821,13 @@ function renderCalendar() {
     </div>
     <div id="cal-tip" class="cal-tip" hidden></div>`;
   bindCalTip();
+}
+
+/* 年月下拉：直接跳到指定月份 */
+function calJump() {
+  const y = $('#cal-year').value;
+  const m = String($('#cal-month').value).padStart(2, '0');
+  loadCalendar(`${y}-${m}`);
 }
 
 function bindCalTip() {
@@ -1289,6 +1310,145 @@ async function loadStats() {
     </div>`;
 }
 
+/* ---------------- 壁纸 ---------------- */
+let WALL = null;
+let WALL_TIMER = null;
+let WALL_SLOT = 0;
+
+async function applyWallpaper() {
+  let w;
+  try {
+    w = await api('/wallpaper', { silent: true });
+  } catch (e) {
+    return;   // 离线时别把整页搞崩
+  }
+  WALL = w;
+  const layer = $('#wall-layer');
+  if (!layer) return;
+
+  const on = w.mode !== 'none' && w.count > 0;
+  document.body.classList.toggle('wall-on', on);
+  layer.hidden = !on;
+  layer.innerHTML = '';
+  clearInterval(WALL_TIMER);
+  WALL_TIMER = null;
+  if (!on) return;
+
+  layer.style.setProperty('--wall-dim', w.dim);
+  layer.style.setProperty('--wall-blur', (w.blur || 0) + 'px');
+
+  if (w.kind === 'video') {
+    const v = document.createElement('video');
+    v.src = '/api/wallpaper/file?i=0';
+    v.autoplay = true;
+    v.muted = true;
+    v.loop = true;
+    v.playsInline = true;
+    layer.appendChild(v);
+    v.play().catch(() => {});   // 自动播放被拦时至少留一张黑底
+    return;
+  }
+
+  const img = document.createElement('img');
+  WALL_SLOT = 0;
+  img.src = '/api/wallpaper/file?i=0';
+  layer.appendChild(img);
+  if (w.count > 1) {
+    // 多图轮播固定 60 秒；WE 里能自定义周期，这里不追
+    WALL_TIMER = setInterval(() => {
+      WALL_SLOT = (WALL_SLOT + 1) % w.count;
+      img.src = `/api/wallpaper/file?i=${WALL_SLOT}`;
+    }, 60000);
+  }
+}
+
+function pickWallFile(kind) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = kind === 'image' ? 'image/*' : 'video/*';
+  input.onchange = async () => {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    toast('正在上传…');
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+      const res = await fetch('/api/wallpaper/upload', { method: 'POST', body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast(data.error || '上传失败');
+        return;
+      }
+      await applyWallpaper();
+      toast('壁纸已换');
+      render();
+    } catch (e) {
+      toast('上传失败：' + (e.message || e));
+    }
+  };
+  input.click();
+}
+
+async function openWePicker() {
+  let d;
+  try {
+    d = await api('/wallpaper/we');
+  } catch (e) {
+    toast(e.message);
+    return;
+  }
+  if (!d.we_dir) {
+    toast('没找到 Wallpaper Engine 安装目录');
+    return;
+  }
+  const cur = d.current || {};
+  const rows = (d.candidates || []).map((c) => `
+    <div class="recent-row">
+      <span><b style="font-weight:500">${esc(c.title)}</b><br>
+        <span class="muted">${c.kind === 'video' ? '视频' : '图片轮播'} · ${c.files.length} 个文件</span></span>
+      <button class="btn" onclick="applyWeWall('${c.id}')">用这个</button>
+    </div>`).join('');
+
+  modal(`
+    <h2 style="margin:0 0 6px;font-size:17px;font-weight:500">从 Wallpaper Engine 取</h2>
+    <div class="cap">${cur.ok
+      ? `当前在用的是「${esc(cur.title)}」，可以直接取。`
+      : esc(cur.reason || '取不到当前壁纸')}</div>
+    ${cur.ok ? `<button class="btn primary" style="margin:8px 0" onclick="applyWeWall()">用当前这张</button>` : ''}
+    <div class="cap" style="margin-top:16px">工坊里能直接播的（${(d.candidates || []).length} 个）</div>
+    ${rows || '<div class="muted" style="padding:10px 2px">没有 video / picture 类型的壁纸</div>'}
+    <div class="row end" style="margin-top:16px">
+      <button class="btn" onclick="closeModal()">关闭</button>
+    </div>`);
+}
+
+async function applyWeWall(id) {
+  try {
+    const r = await api('/wallpaper/we', { method: 'POST', body: id ? { id } : {} });
+    closeModal();
+    await applyWallpaper();
+    toast(`壁纸已换成「${r.title}」`);
+    render();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function clearWall() {
+  await api('/wallpaper', { method: 'DELETE' });
+  await applyWallpaper();
+  toast('已恢复默认背景');
+  render();
+}
+
+async function saveWallTune() {
+  await api('/wallpaper', {
+    method: 'PUT',
+    body: { dim: Number($('#w-dim').value), blur: Number($('#w-blur').value) },
+  });
+  await applyWallpaper();
+}
+
 /* ---------------- 设置 ---------------- */
 async function loadSettings() {
   const s = await api('/settings');
@@ -1296,6 +1456,27 @@ async function loadSettings() {
   const checks = await api('/checks');
   // 桌面版才有这两项；浏览器打开时后端返回 mode='headless'，面板降级为只读
   const desktop = await api('/desktop/state');
+  const wall = await api('/wallpaper');
+  const wallPanel = `
+    <div class="panel" style="margin-bottom:16px">
+      <h3>个性化</h3>
+      <div class="cap">背景壁纸。WE 的 scene / web 类要靠它自己的引擎渲染，取不过来，只能用 video / picture。</div>
+      <div class="row">
+        <button class="btn" onclick="pickWallFile('image')">选图片</button>
+        <button class="btn" onclick="pickWallFile('video')">选视频</button>
+        <button class="btn primary" onclick="openWePicker()">从 Wallpaper Engine 取</button>
+        <button class="btn ghost" onclick="clearWall()">恢复默认</button>
+      </div>
+      <div class="muted" style="margin-top:8px;font-size:12px">
+        当前：${wall.mode === 'none' ? '默认背景' : esc(wall.title || wall.mode)}
+      </div>
+      <div class="grid2" style="margin-top:12px">
+        <label class="field"><span>遮罩（越大文字越清楚）</span>
+          <input id="w-dim" type="range" min="0" max="0.9" step="0.05" value="${wall.dim}" onchange="saveWallTune()"></label>
+        <label class="field"><span>模糊（px）</span>
+          <input id="w-blur" type="range" min="0" max="20" step="1" value="${wall.blur}" onchange="saveWallTune()"></label>
+      </div>
+    </div>`;
   const closeOpts = [['tray', '缩进托盘，后台继续跑'], ['exit', '直接退出程序']]
     .map(([v, t]) => `<option value="${v}"${desktop.close_action === v ? ' selected' : ''}>${t}</option>`)
     .join('');
@@ -1351,6 +1532,7 @@ async function loadSettings() {
         <button class="btn" onclick="addCheck()">加一项</button>
       </div>
     </div>
+    ${wallPanel}
     ${desktopPanel}
     <div class="panel">
       <h3>数据目录</h3><div class="cap">整个目录可以搬到任何盘，搬完在这里改一下就行</div>
@@ -1452,6 +1634,51 @@ $('#tabs').addEventListener('click', (e) => {
   render();
 });
 
+/* 标签可拖动排序，顺序记在 localStorage —— 每个人常用入口不一样 */
+(function bindTabDrag() {
+  const nav = $('#tabs');
+  if (!nav) return;
+
+  try {
+    const saved = JSON.parse(localStorage.getItem('scj.tabOrder') || '[]');
+    saved.forEach((v) => {
+      const el = nav.querySelector(`.tab[data-view="${v}"]`);
+      if (el) nav.appendChild(el);
+    });
+  } catch (e) { /* 存坏了就当没存过 */ }
+
+  let dragEl = null;
+  nav.querySelectorAll('.tab').forEach((t) => { t.draggable = true; });
+
+  nav.addEventListener('dragstart', (e) => {
+    const t = e.target.closest('.tab');
+    if (!t) return;
+    dragEl = t;
+    t.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', t.dataset.view);
+  });
+
+  nav.addEventListener('dragover', (e) => {
+    if (!dragEl) return;
+    e.preventDefault();
+    const t = e.target.closest('.tab');
+    if (!t || t === dragEl) return;
+    const r = t.getBoundingClientRect();
+    // 越过一半就换位，手感接近真实拖拽
+    nav.insertBefore(dragEl, e.clientX > r.left + r.width / 2 ? t.nextSibling : t);
+  });
+
+  nav.addEventListener('dragend', () => {
+    if (dragEl) dragEl.classList.remove('dragging');
+    dragEl = null;
+    localStorage.setItem(
+      'scj.tabOrder',
+      JSON.stringify([...nav.querySelectorAll('.tab')].map((b) => b.dataset.view))
+    );
+  });
+})();
+
 if (VIEWS[location.hash.slice(1)]) CURRENT_VIEW = location.hash.slice(1);
 
 $('#modal').addEventListener('click', (e) => {
@@ -1462,4 +1689,5 @@ document.addEventListener('keydown', (e) => {
 });
 
 startClock();
+applyWallpaper();
 render();

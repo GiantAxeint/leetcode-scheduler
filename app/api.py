@@ -9,10 +9,10 @@ import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from flask import Flask, g, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_file, send_from_directory
 from werkzeug.exceptions import HTTPException
 
-from . import config, db, host, scheduler, state
+from . import config, db, host, scheduler, state, wallpaper
 
 # 每个数据根只初始化一次；否则两个并发请求同时建表会撞写锁
 _INIT_LOCK = threading.Lock()
@@ -226,6 +226,106 @@ def create_app(root: Path | None = None) -> Flask:
                 "days": days,
             }
         )
+
+    # ---------- 壁纸 ----------
+    @app.get("/api/wallpaper")
+    def api_wallpaper():
+        c = conn()
+        files = wallpaper.resolve_files(db.get_setting(c, "wall_files", "[]"))
+        mode = db.get_setting(c, "wall_mode", "none")
+        if mode != "none" and not files:
+            mode = "none"          # 文件被删了或路径失效，就当作没设置
+        out = {
+            "mode": mode,
+            "kind": db.get_setting(c, "wall_kind", "video"),
+            "title": db.get_setting(c, "wall_title", ""),
+            "count": len(files),
+            "dim": db.get_float(c, "wall_dim", 0.35),
+            "blur": db.get_int(c, "wall_blur", 0),
+        }
+        return jsonify(out)
+
+    @app.put("/api/wallpaper")
+    def api_wallpaper_update():
+        c = conn()
+        b = request.get_json(force=True) or {}
+        if "dim" in b:
+            db.set_setting(c, "wall_dim", max(0.0, min(0.95, float(b["dim"]))))
+        if "blur" in b:
+            db.set_setting(c, "wall_blur", max(0, min(30, int(b["blur"]))))
+        return api_wallpaper()
+
+    @app.post("/api/wallpaper/upload")
+    def api_wallpaper_upload():
+        f = request.files.get("file")
+        if not f or not f.filename:
+            return jsonify({"error": "没有选文件"}), 400
+        data = f.read()
+        if len(data) > 300 * 1024 * 1024:
+            return jsonify({"error": "文件太大（上限 300MB）"}), 413
+        target = wallpaper.store_upload(Path(app.config["ROOT"]), f.filename, data)
+        c = conn()
+        kind = "video" if wallpaper.is_video(target) else "picture"
+        db.set_setting(c, "wall_files", json.dumps([str(target)], ensure_ascii=False))
+        db.set_setting(c, "wall_mode", kind)
+        db.set_setting(c, "wall_kind", kind)
+        db.set_setting(c, "wall_title", f.filename)
+        return jsonify({"ok": True, "mode": kind, "title": f.filename})
+
+    @app.get("/api/wallpaper/file")
+    def api_wallpaper_file():
+        """只放行 settings 里登记过的文件 —— 别把整个磁盘开成静态目录。"""
+        c = conn()
+        files = wallpaper.resolve_files(db.get_setting(c, "wall_files", "[]"))
+        if not files:
+            return jsonify({"error": "没有壁纸"}), 404
+        try:
+            idx = int(request.args.get("i") or 0)
+        except ValueError:
+            idx = 0
+        if not 0 <= idx < len(files):
+            return jsonify({"error": "索引越界"}), 404
+        return send_file(files[idx], conditional=True)
+
+    @app.get("/api/wallpaper/we")
+    def api_wallpaper_we_list():
+        """WE 探测：当前那张能不能用 + 工坊里有哪些能直接播的。"""
+        return jsonify(
+            {
+                "we_dir": str(wallpaper.we_dir() or ""),
+                "current": wallpaper.probe_we(),
+                "candidates": wallpaper.list_we_wallpapers(),
+            }
+        )
+
+    @app.post("/api/wallpaper/we")
+    def api_wallpaper_we():
+        """应用 WE 壁纸。不传 id 就用当前正在用的那张。"""
+        b = request.get_json(force=True, silent=True) or {}
+        res = wallpaper.probe_we(b.get("id") or None)
+        if not res.get("ok"):
+            return jsonify(res), 400
+        c = conn()
+        db.set_setting(c, "wall_files", json.dumps(res["files"], ensure_ascii=False))
+        db.set_setting(c, "wall_mode", "video" if res["kind"] == "video" else "picture")
+        db.set_setting(c, "wall_kind", res["kind"])
+        db.set_setting(c, "wall_title", res.get("title", ""))
+        return jsonify(
+            {
+                "ok": True,
+                "kind": res["kind"],
+                "count": len(res["files"]),
+                "title": res.get("title", ""),
+            }
+        )
+
+    @app.delete("/api/wallpaper")
+    def api_wallpaper_clear():
+        c = conn()
+        db.set_setting(c, "wall_mode", "none")
+        db.set_setting(c, "wall_files", "[]")
+        db.set_setting(c, "wall_title", "")
+        return jsonify({"ok": True})
 
     # ---------- 复习（判的是题，不是卡） ----------
     @app.post("/api/review")

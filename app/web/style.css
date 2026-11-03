@@ -127,6 +127,19 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 .view.active { display: block; }
 
 .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+/* 题多的时候三个班各自滚，别把页面拉得老长 */
+.cols > .panel {
+  max-height: calc(100vh - 330px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.cols > .panel::-webkit-scrollbar { width: 6px; }
+.cols > .panel::-webkit-scrollbar-thumb { background: #dcd9d0; border-radius: 3px; }
+.cols > .panel::-webkit-scrollbar-track { background: transparent; }
+
+/* 标签可拖动排序 */
+.tab[draggable="true"] { cursor: grab; }
+.tab.dragging { opacity: .4; }
 
 .panel {
   background: var(--panel);
@@ -338,6 +351,38 @@ pre.code {
   box-shadow: inset 0 0 0 1px var(--blue);
 }
 
+/* ---------------- 壁纸 ---------------- */
+.wall-layer {
+  position: fixed; inset: 0; z-index: -1; overflow: hidden; background: #101010;
+}
+.wall-layer video,
+.wall-layer img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  filter: blur(var(--wall-blur, 0px));
+  transform: scale(1.04);   /* 模糊后边缘会露底，放大一点盖住 */
+}
+.wall-layer::after {
+  content: ''; position: absolute; inset: 0;
+  background: rgba(255, 255, 255, var(--wall-dim, .35));
+}
+
+/* 开了壁纸后，面板得半透明才看得见底下的图 */
+body.wall-on { background: transparent; }
+body.wall-on .panel,
+body.wall-on .item,
+body.wall-on .pcard,
+body.wall-on .drawer,
+body.wall-on .ditem,
+body.wall-on .cal-cell,
+body.wall-on .modal-box {
+  background: rgba(255, 255, 255, .84);
+  backdrop-filter: blur(10px);
+}
+body.wall-on .top {
+  background: rgba(255, 255, 255, .72);
+  backdrop-filter: blur(10px);
+}
+
 /* ---------------- 日历 ---------------- */
 .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
 .cal-w { text-align: center; font-size: 12px; color: var(--hint); padding-bottom: 2px; }
@@ -349,9 +394,18 @@ pre.code {
 .cal-cell.has { background: #fbfbf7; }
 .cal-cell.today { border-color: var(--blue); }
 .cal-cell.over { background: #fdf3f3; border-color: #f0cfcf; }
-.cal-cell .cal-d { font-size: 12px; color: var(--sub); }
-.cal-cell .cal-n { font-size: 17px; font-weight: 500; margin-top: 2px; }
-.cal-cell.over .cal-n { color: var(--red); }
+/* 日期数字原来太浅，扫一眼找不到；加深到接近正文 */
+.cal-cell .cal-d { font-size: 12px; color: #4a4843; }
+.cal-cell .cal-n { font-size: 17px; font-weight: 600; margin-top: 2px; }
+/* 题量分档上色：≤容量 绿，≤2 倍 褐，再多 深红 */
+.cal-cell.q1 .cal-n { color: #2f7d32; }
+.cal-cell.q2 .cal-n { color: #8a5300; }
+.cal-cell.q3 .cal-n { color: #a31515; }
+
+.cal-sel {
+  width: auto; padding: 4px 8px; font-size: 13px;
+  border-radius: 6px; cursor: pointer;
+}
 
 .cal-tip {
   position: fixed; z-index: 60; width: 300px; max-height: 320px; overflow: auto;
