@@ -109,6 +109,24 @@ def _media_in(folder: Path, want: str) -> list[Path]:
     return sorted(files, key=lambda p: p.name)
 
 
+def workshop_dir() -> Path | None:
+    steam = _steam_path()
+    if steam is None:
+        return None
+    p = steam / "steamapps" / "workshop" / "content" / "431960"
+    return p if p.is_dir() else None
+
+
+def preview_file(folder: Path) -> Path | None:
+    """壁纸项目的预览图。WE 自己就靠 preview.* 在库里显示缩略图。"""
+    for name in ("preview.jpg", "preview.png", "preview.gif", "preview.webp", "preview.jpeg"):
+        p = folder / name
+        if p.is_file():
+            return p
+    imgs = _media_in(folder, "image")   # 没有 preview 就退而用项目里的第一张图
+    return imgs[0] if imgs else None
+
+
 def _folder_media(folder: Path, meta: dict, kind: str) -> list[str]:
     """从一个壁纸项目里取出可播放的文件。视频取主的那个，图片按名称排。"""
     if kind == "video":
@@ -140,8 +158,8 @@ def list_we_wallpapers() -> list[dict]:
     steam = _steam_path()
     if steam is None:
         return []
-    base = steam / "steamapps" / "workshop" / "content" / "431960"
-    if not base.is_dir():
+    base = workshop_dir()
+    if base is None:
         return []
 
     out: list[dict] = []

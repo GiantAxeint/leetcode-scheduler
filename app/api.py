@@ -287,6 +287,19 @@ def create_app(root: Path | None = None) -> Flask:
             return jsonify({"error": "索引越界"}), 404
         return send_file(files[idx], conditional=True)
 
+    @app.get("/api/wallpaper/thumb")
+    def api_wallpaper_thumb():
+        """工坊壁纸的预览图。只收数字 id，路径由后端拼，前端给不了任意路径。"""
+        pid = (request.args.get("id") or "").strip()
+        if not pid.isdigit():
+            return jsonify({"error": "id 不合法"}), 400
+        base = wallpaper.workshop_dir()
+        folder = base / pid if base else None
+        p = wallpaper.preview_file(folder) if folder and folder.is_dir() else None
+        if p is None:
+            return jsonify({"error": "没有预览图"}), 404
+        return send_file(p, conditional=True, max_age=3600)
+
     @app.get("/api/wallpaper/we")
     def api_wallpaper_we_list():
         """WE 探测：当前那张能不能用 + 工坊里有哪些能直接播的。"""

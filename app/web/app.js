@@ -1391,24 +1391,21 @@ async function openWePicker() {
     return;
   }
   const cur = d.current || {};
-  const rows = (d.candidates || []).map((c) => `
-    <div class="recent-row">
-      <span><b style="font-weight:500">${esc(c.title)}</b><br>
-        <span class="muted">${c.kind === 'video' ? '视频' : '图片轮播'} · ${c.files.length} 个文件</span></span>
-      <button class="btn" onclick="applyWeWall('${c.id}')">用这个</button>
+  const tiles = (d.candidates || []).map((c) => `
+    <div class="we-tile" onclick="applyWeWall('${c.id}')" title="${esc(c.title)}">
+      <img src="/api/wallpaper/thumb?id=${c.id}" loading="lazy" alt="">
+      <span class="we-badge">${c.kind === 'video' ? '视频' : '图片'}</span>
+      <span class="we-title">${esc(c.title)}</span>
     </div>`).join('');
 
   modal(`
-    <h2 style="margin:0 0 6px;font-size:17px;font-weight:500">从 Wallpaper Engine 取</h2>
-    <div class="cap">${cur.ok
-      ? `当前在用的是「${esc(cur.title)}」，可以直接取。`
-      : esc(cur.reason || '取不到当前壁纸')}</div>
-    ${cur.ok ? `<button class="btn primary" style="margin:8px 0" onclick="applyWeWall()">用当前这张</button>` : ''}
-    <div class="cap" style="margin-top:16px">工坊里能直接播的（${(d.candidates || []).length} 个）</div>
-    ${rows || '<div class="muted" style="padding:10px 2px">没有 video / picture 类型的壁纸</div>'}
-    <div class="row end" style="margin-top:16px">
+    <div class="row" style="margin-bottom:14px">
+      <h2 style="margin:0;font-size:17px;font-weight:500">Wallpaper Engine</h2>
+      <div class="spacer"></div>
+      ${cur.ok ? `<button class="btn primary" onclick="applyWeWall()">用当前这张</button>` : ''}
       <button class="btn" onclick="closeModal()">关闭</button>
-    </div>`);
+    </div>
+    <div class="we-grid">${tiles || '<div class="muted" style="padding:10px 2px">工坊里没有能直接播的壁纸</div>'}</div>`, true);
 }
 
 async function applyWeWall(id) {
@@ -1452,7 +1449,7 @@ async function loadSettings() {
       <div class="row">
         <button class="btn" onclick="pickWallFile('image')">选图片</button>
         <button class="btn" onclick="pickWallFile('video')">选视频</button>
-        <button class="btn primary" onclick="openWePicker()">从 Wallpaper Engine 取</button>
+        <button class="btn primary" onclick="openWePicker()">Wallpaper Engine</button>
         <button class="btn ghost" onclick="clearWall()">恢复默认</button>
       </div>
       <div class="muted" style="margin-top:8px;font-size:12px">
