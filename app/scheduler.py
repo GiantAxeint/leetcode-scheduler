@@ -277,40 +277,56 @@ def _next_free_day(conn: sqlite3.Connection, after: str, cap: int, span: int = 9
     return None
 
 
-def disperse_day(conn: sqlite3.Connection, day: str, cap: int) -> dict:
-    """把某天超容量的题往后挪。
+def disperse_day(conn: sqlite3.Connection, day: str, cap: int,
+                 ids: list[int] | None = None, target: str | None = None) -> dict:
+    """把某天的题往后挪。
 
-    只挪三分之一，且优先低档位 —— 高档位的题间隔长，挪一次等于毁掉半个月的节奏。
-    目标日从次日往后找第一个没满的工作日，放满了继续往后。
+    两种用法：
+      - 自动：只挪三分之一、优先低档位，目标日从次日起找第一个没满的工作日
+      - 手动：ids 指定挪哪几道（这时不受三分之一限制，用户自己选的），
+              target 指定挪到哪天（覆盖容量，用户说了算）
     """
     rows = conn.execute(
         "SELECT id, stage FROM problem WHERE phase='active' AND next_due=? "
         "ORDER BY stage ASC, id DESC",
         (day,),
     ).fetchall()
-    n = len(rows)
-    if n <= cap:
-        return {"ok": False, "reason": f"这天 {n} 道，没超容量 {cap}"}
+    if not rows:
+        return {"ok": False, "reason": "这天没有在途的题"}
 
-    quota = max(1, n // 3)      # 最多挪三分之一
-    need = n - cap              # 至少挪这么多才降到容量内
-    count = min(quota, need)
+    manual = ids is not None
+    if manual:
+        want = {int(x) for x in ids}
+        picks = [r for r in rows if r["id"] in want]
+    else:
+        n = len(rows)
+        if n <= cap:
+            return {"ok": False, "reason": f"这天 {n} 道，没超容量 {cap}"}
+        quota = max(1, n // 3)      # 最多挪三分之一
+        need = n - cap              # 至少挪这么多才降到容量内
+        picks = rows[:min(quota, need)]
+
+    if not picks:
+        return {"ok": False, "reason": "没有可分散的题"}
 
     batch = datetime.now().strftime("%Y%m%d%H%M%S%f")[:18]
     moves: list[dict] = []
     cursor = day
-    for r in rows[:count]:
-        target = _next_free_day(conn, cursor, cap)
-        if target is None:
-            break
-        conn.execute("UPDATE problem SET next_due=? WHERE id=?", (target, r["id"]))
+    for r in picks:
+        if target:
+            to = target
+        else:
+            to = _next_free_day(conn, cursor, cap)
+            if to is None:
+                break
+            cursor = to
+        conn.execute("UPDATE problem SET next_due=? WHERE id=?", (to, r["id"]))
         conn.execute(
             "INSERT INTO disperse_log(batch_id, problem_id, from_date, to_date) "
             "VALUES(?,?,?,?)",
-            (batch, r["id"], day, target),
+            (batch, r["id"], day, to),
         )
-        moves.append({"id": r["id"], "to": target})
-        cursor = target
+        moves.append({"id": r["id"], "to": to})
     conn.commit()
 
     if not moves:

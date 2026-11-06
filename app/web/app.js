@@ -783,7 +783,7 @@ function renderCalendar() {
       cls.push(list.length <= cap ? 'q1' : list.length <= cap * 2 ? 'q2' : 'q3');
     }
     if (list.length > cap) cls.push('over');
-    cells += `<div class="${cls.join(' ')}" data-date="${iso}" onclick="openDay('${iso}')">
+    cells += `<div class="${cls.join(' ')}" data-date="${iso}" onclick="openDay('${iso}')" oncontextmenu="openDayMenu(event,'${iso}')">
       <div class="cal-d">${day}</div>
       ${list.length ? `<div class="cal-n">${list.length}</div>` : ''}
     </div>`;
@@ -802,51 +802,81 @@ function renderCalendar() {
     <div class="row" style="margin-bottom:14px">
       <select id="cal-year" class="cal-sel" onchange="calJump()">${yearOpts}</select>
       <select id="cal-month" class="cal-sel" onchange="calJump()">${monthOpts}</select>
-      <span class="muted">每天容量 ${cap} 题</span>
       <div class="spacer"></div>
       <button class="btn ghost" onclick="stepMonth(-1)">上一月</button>
       <button class="btn ghost" onclick="goThisMonth()">本月</button>
       <button class="btn ghost" onclick="stepMonth(1)">下一月</button>
     </div>
-    ${d.last_disperse ? `<div class="row" style="margin-bottom:10px">
-      <span class="muted">上次分散 ${d.last_disperse.count} 道 · ${d.last_disperse.at.slice(5, 16)}</span>
-      <button class="btn ghost" onclick="undoSpread('${d.last_disperse.batch}')">撤回</button>
-    </div>` : ''}
     <div class="panel"><div class="cal-grid">${head}${cells}</div></div>
-    <div class="muted" style="margin-top:10px;font-size:12px">
-      只列在途题（候补不算）。数字是「那天到期几道」，实际排进班次还要看每日容量。
-    </div>
     <div id="cal-tip" class="cal-tip" hidden></div>`;
   bindCalTip();
 }
 
-/* 点某天：看当天题目，超容量时给「分散」入口 */
+/* 点某天：勾选题目 → 分散。右键出菜单，可分散也可撤回 */
+let DAY_PICK = { iso: null, ids: new Set() };
+let CTX_MENU = null;
+
 function openDay(iso) {
   const list = (CAL.data.days[iso] || []);
-  const cap = CAL.data.capacity || 6;
-  const over = list.length - cap;
-  const quota = over > 0 ? Math.min(Math.max(1, Math.floor(list.length / 3)), over) : 0;
+  const batch = (CAL.data.disperse || {})[iso];
+  DAY_PICK = { iso, ids: new Set() };
+
   const rows = list.map((p) => `
-    <div class="recent-row">
-      <span><b style="font-weight:500">${titleLink(p.title, p)}</b>
+    <label class="day-row">
+      <input type="checkbox" value="${p.id}" onchange="toggleDayPick(${p.id}, this.checked)">
+      <span class="day-meta">
+        <span>${titleLink(p.title, p)}</span>
         <span class="muted">${[p.leetcode_id ? '#' + p.leetcode_id : '',
-          p.stage ? 'S' + p.stage : '新题', p.difficulty || ''].filter(Boolean).join(' · ')}</span></span>
-    </div>`).join('');
+          p.stage ? 'S' + p.stage : '新题', p.difficulty || ''].filter(Boolean).join(' · ')}</span>
+      </span>
+    </label>`).join('');
+
   modal(`
     <div class="row" style="margin-bottom:10px">
       <h2 style="margin:0;font-size:17px;font-weight:500">${iso}</h2>
-      <span class="muted">${list.length} 道 · 容量 ${cap}</span>
+      <span class="muted">${list.length} 道</span>
     </div>
     ${rows || '<div class="muted" style="padding:8px 2px">这天没有题</div>'}
-    <div class="row end" style="margin-top:16px">
-      ${quota > 0 ? `<button class="btn primary" onclick="spreadDay('${iso}')">分散 ${quota} 道到后面</button>` : ''}
+    <div class="row" style="margin-top:16px">
+      <button class="btn ghost"${batch ? '' : ' disabled'}
+        onclick="undoSpread('${batch || ''}')">撤回分散</button>
+      <div class="spacer"></div>
       <button class="btn" onclick="closeModal()">关闭</button>
+      <button class="btn primary"${list.length ? '' : ' disabled'}
+        onclick="confirmSpread()">分散所选题目</button>
     </div>`);
 }
 
-async function spreadDay(iso) {
+function toggleDayPick(id, on) {
+  if (on) DAY_PICK.ids.add(id);
+  else DAY_PICK.ids.delete(id);
+}
+
+function confirmSpread() {
+  const { iso, ids } = DAY_PICK;
+  if (!ids.size) {
+    toast('先勾选要分散的题');
+    return;
+  }
+  modal(`
+    <h2 style="margin:0 0 12px;font-size:17px;font-weight:500">是否真的要分散这些题目？</h2>
+    <div class="muted" style="margin-bottom:16px">从 ${iso} 分散 ${ids.size} 道</div>
+    <label class="field"><span>分散到哪一天（留空 = 自动找后面的空天）</span>
+      <input id="disp-target" type="date"></label>
+    <div class="row end" style="margin-top:16px">
+      <button class="btn" onclick="openDay('${iso}')">否</button>
+      <button class="btn primary" onclick="doSpread()">是</button>
+    </div>`);
+}
+
+async function doSpread() {
+  const { iso, ids } = DAY_PICK;
+  const target = ($('#disp-target') && $('#disp-target').value) || null;
   try {
-    const r = await api('/calendar/disperse', { method: 'POST', body: { date: iso } });
+    const r = await api('/calendar/disperse', {
+      method: 'POST',
+      body: { date: iso, problem_ids: [...ids], target },
+    });
     closeModal();
     const where = Object.entries(r.spread)
       .map(([d, n]) => `${d.slice(5)}×${n}`).join('、');
@@ -854,6 +884,31 @@ async function spreadDay(iso) {
     await loadCalendar();
   } catch (e) {
     toast(e.message);
+  }
+}
+
+/* 右键菜单：分散 / 撤回分散 */
+function openDayMenu(e, iso) {
+  e.preventDefault();
+  e.stopPropagation();
+  closeCtxMenu();
+  const batch = (CAL.data.disperse || {})[iso];
+  const menu = document.createElement('div');
+  menu.className = 'ctx-menu';
+  menu.innerHTML = `
+    <button class="ctx-item" onclick="closeCtxMenu();openDay('${iso}')">分散…</button>
+    <button class="ctx-item"${batch ? '' : ' disabled'}
+      onclick="closeCtxMenu();undoSpread('${batch || ''}')">撤回分散</button>`;
+  menu.style.left = Math.min(e.clientX, window.innerWidth - 160) + 'px';
+  menu.style.top = Math.min(e.clientY, window.innerHeight - 100) + 'px';
+  document.body.appendChild(menu);
+  CTX_MENU = menu;
+}
+
+function closeCtxMenu() {
+  if (CTX_MENU) {
+    CTX_MENU.remove();
+    CTX_MENU = null;
   }
 }
 
@@ -1735,6 +1790,9 @@ $('#tabs').addEventListener('click', (e) => {
 })();
 
 if (VIEWS[location.hash.slice(1)]) CURRENT_VIEW = location.hash.slice(1);
+
+document.addEventListener('click', closeCtxMenu);
+window.addEventListener('resize', closeCtxMenu);
 
 $('#modal').addEventListener('click', (e) => {
   if (e.target.id === 'modal') closeModal();

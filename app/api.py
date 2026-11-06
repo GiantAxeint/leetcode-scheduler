@@ -218,12 +218,20 @@ def create_app(root: Path | None = None) -> Flask:
                 }
             )
 
+        # 每天最近一次分散的批次，用来判断「撤回分散」能不能点
+        disperse: dict[str, str] = {}
+        for r in c.execute(
+            "SELECT from_date, batch_id FROM disperse_log ORDER BY id DESC"
+        ):
+            disperse.setdefault(r["from_date"], r["batch_id"])
+
         return jsonify(
             {
                 "month": month,
                 "capacity": db.get_int(c, "daily_capacity", 6),
                 "today": scheduler.today_str(),
                 "days": days,
+                "disperse": disperse,
                 "last_disperse": scheduler.last_disperse(c),
             }
         )
@@ -237,9 +245,20 @@ def create_app(root: Path | None = None) -> Flask:
             date.fromisoformat(day)
         except ValueError:
             return jsonify({"error": "date 格式应为 YYYY-MM-DD"}), 400
+        target = (b.get("target") or "").strip() or None
+        if target:
+            try:
+                date.fromisoformat(target)
+            except ValueError:
+                return jsonify({"error": "target 格式应为 YYYY-MM-DD"}), 400
+            if target == day:
+                return jsonify({"error": "目标日期不能是同一天"}), 400
+        ids = b.get("problem_ids")
+        if ids is not None and not isinstance(ids, list):
+            return jsonify({"error": "problem_ids 应为数组"}), 400
         c = conn()
         cap = db.get_int(c, "daily_capacity", 6)
-        res = scheduler.disperse_day(c, day, cap)
+        res = scheduler.disperse_day(c, day, cap, ids=ids, target=target)
         if not res.get("ok"):
             return jsonify(res), 400
         return jsonify(res)

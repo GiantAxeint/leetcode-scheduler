@@ -521,3 +521,32 @@ th { color: var(--sub); font-weight: 500; font-size: 12px; }
 /* 最近处理的结果标记 */
 .badge.okb { background: #e4f0dc; color: #3b6d11; }
 .badge.badb { background: #fbe0e0; color: #a32d2d; }
+
+/* 日期弹窗里的题目行（带勾选） */
+.day-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 8px 2px; border-top: 1px solid var(--line); cursor: pointer;
+}
+.day-row:first-of-type { border-top: 0; }
+.day-row input[type="checkbox"] {
+  width: 15px; height: 15px; margin: 3px 0 0; flex: 0 0 auto;
+  accent-color: var(--blue); cursor: pointer;
+}
+.day-meta { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.day-meta .muted { font-size: 12px; }
+
+/* 日历右键菜单 */
+.ctx-menu {
+  position: fixed; z-index: 80; min-width: 140px; padding: 4px;
+  background: #fff; border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(20, 20, 18, .16);
+}
+.ctx-item {
+  display: block; width: 100%; text-align: left;
+  border: 0; background: none; border-radius: 6px;
+  padding: 7px 10px; font-size: 13px; font-family: inherit;
+  color: var(--text); cursor: pointer;
+}
+.ctx-item:hover { background: #f2f1ec; }
+.ctx-item:disabled { color: #bcb9b0; cursor: not-allowed; }
+.ctx-item:disabled:hover { background: none; }
