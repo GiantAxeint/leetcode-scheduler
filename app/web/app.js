@@ -852,30 +852,103 @@ function toggleDayPick(id, on) {
   else DAY_PICK.ids.delete(id);
 }
 
+let SPREAD_SRC = null;
+let SPREAD_PICK = { month: null, date: null, days: {}, cap: 6 };
+
 function confirmSpread() {
   const { iso, ids } = DAY_PICK;
   if (!ids.size) {
     toast('先勾选要分散的题');
     return;
   }
+  SPREAD_SRC = iso;
+  SPREAD_PICK = { month: iso.slice(0, 7), date: null, days: CAL.data.days, cap: CAL.data.capacity || 6 };
+  drawSpreadPick();
+}
+
+/* 确认页里嵌一个小月历选目标日 —— 原生 date 输入框太难用，而且看不出哪天挤 */
+function drawSpreadPick() {
+  const [y, m] = SPREAD_PICK.month.split('-').map(Number);
+  const pad = (new Date(y, m - 1, 1).getDay() + 6) % 7;
+  const total = new Date(y, m, 0).getDate();
+  const head = ['一', '二', '三', '四', '五', '六', '日']
+    .map((w) => `<div class="pick-w">${w}</div>`).join('');
+
+  let cells = '';
+  for (let i = 0; i < pad; i++) cells += '<div class="pick-cell empty"></div>';
+  for (let d = 1; d <= total; d++) {
+    const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const cnt = (SPREAD_PICK.days[iso] || []).length;
+    const cls = ['pick-cell'];
+    if (cnt) cls.push('has');
+    if (cnt > SPREAD_PICK.cap) cls.push('over');
+    if (iso === SPREAD_PICK.date) cls.push('on');
+    if (iso === SPREAD_SRC) cls.push('src');
+    cells += `<div class="${cls.join(' ')}" onclick="pickTarget('${iso}')">
+      <span class="pd">${d}</span>${cnt ? `<span class="pn">${cnt}</span>` : ''}
+    </div>`;
+  }
+
   modal(`
-    <h2 style="margin:0 0 12px;font-size:17px;font-weight:500">是否真的要分散这些题目？</h2>
-    <div class="muted" style="margin-bottom:16px">从 ${iso} 分散 ${ids.size} 道</div>
-    <label class="field"><span>分散到哪一天（留空 = 自动找后面的空天）</span>
-      <input id="disp-target" type="date"></label>
+    <h2 style="margin:0 0 10px;font-size:17px;font-weight:500">是否真的要分散这些题目？</h2>
+    <div class="muted" style="margin-bottom:12px">
+      从 ${SPREAD_SRC} 分散 ${DAY_PICK.ids.size} 道${
+        SPREAD_PICK.date ? ` → ${SPREAD_PICK.date}` : '（没选目标就自动往后找空天）'}
+    </div>
+    <div class="row" style="margin-bottom:8px">
+      <button class="btn ghost" onclick="stepPick(-1)">上一月</button>
+      <b style="font-size:13px">${y} 年 ${m} 月</b>
+      <button class="btn ghost" onclick="stepPick(1)">下一月</button>
+      <div class="spacer"></div>
+      ${SPREAD_PICK.date ? '<button class="btn ghost" onclick="clearPick()">清除</button>' : ''}
+    </div>
+    <div class="pick-grid">${head}${cells}</div>
     <div class="row end" style="margin-top:16px">
-      <button class="btn" onclick="openDay('${iso}')">否</button>
+      <button class="btn" onclick="openDay('${SPREAD_SRC}')">否</button>
       <button class="btn primary" onclick="doSpread()">是</button>
     </div>`);
 }
 
+function pickTarget(iso) {
+  if (iso === SPREAD_SRC) {
+    toast('不能挪回同一天');
+    return;
+  }
+  SPREAD_PICK.date = SPREAD_PICK.date === iso ? null : iso;
+  drawSpreadPick();
+}
+
+function clearPick() {
+  SPREAD_PICK.date = null;
+  drawSpreadPick();
+}
+
+async function stepPick(delta) {
+  const [y, m] = SPREAD_PICK.month.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  SPREAD_PICK.month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  if (SPREAD_PICK.month === CAL.month) {
+    SPREAD_PICK.days = CAL.data.days;
+    SPREAD_PICK.cap = CAL.data.capacity || 6;
+  } else {
+    try {
+      const r = await api('/calendar?month=' + SPREAD_PICK.month);
+      SPREAD_PICK.days = r.days || {};
+      SPREAD_PICK.cap = r.capacity || 6;
+    } catch (e) {
+      SPREAD_PICK.days = {};
+    }
+  }
+  drawSpreadPick();
+}
+
 async function doSpread() {
-  const { iso, ids } = DAY_PICK;
-  const target = ($('#disp-target') && $('#disp-target').value) || null;
+  const { ids } = DAY_PICK;
+  const target = SPREAD_PICK.date || null;
   try {
     const r = await api('/calendar/disperse', {
       method: 'POST',
-      body: { date: iso, problem_ids: [...ids], target },
+      body: { date: SPREAD_SRC, problem_ids: [...ids], target },
     });
     closeModal();
     const where = Object.entries(r.spread)

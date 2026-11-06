@@ -550,3 +550,18 @@ th { color: var(--sub); font-weight: 500; font-size: 12px; }
 .ctx-item:hover { background: #f2f1ec; }
 .ctx-item:disabled { color: #bcb9b0; cursor: not-allowed; }
 .ctx-item:disabled:hover { background: none; }
+
+/* 分散确认页里的小月历 */
+.pick-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.pick-w { text-align: center; font-size: 11px; color: var(--hint); padding-bottom: 2px; }
+.pick-cell {
+  min-height: 42px; border: 1px solid var(--line); border-radius: 6px;
+  padding: 3px 6px; background: #fff; cursor: pointer; position: relative;
+}
+.pick-cell.empty { border: 0; background: none; cursor: default; }
+.pick-cell.has { background: #fbfbf7; }
+.pick-cell.over { background: #fbe3e3; border-color: #eebdbd; }
+.pick-cell.src { opacity: .4; cursor: not-allowed; }
+.pick-cell.on { outline: 2px solid var(--blue); outline-offset: -2px; background: #eaf1fd; }
+.pick-cell .pd { font-size: 12px; color: #4a4843; }
+.pick-cell .pn { position: absolute; right: 5px; bottom: 2px; font-size: 11px; color: var(--hint); }
