@@ -805,7 +805,7 @@ function renderCalendar() {
       <span class="muted">每天容量 ${cap} 题</span>
       <div class="spacer"></div>
       <button class="btn ghost" onclick="stepMonth(-1)">上一月</button>
-      <button class="btn ghost" onclick="loadCalendar()">本月</button>
+      <button class="btn ghost" onclick="goThisMonth()">本月</button>
       <button class="btn ghost" onclick="stepMonth(1)">下一月</button>
     </div>
     ${d.last_disperse ? `<div class="row" style="margin-bottom:10px">
@@ -865,6 +865,13 @@ async function undoSpread(batch) {
   } catch (e) {
     toast(e.message);
   }
+}
+
+/* 「本月」要显式带回当前月：loadCalendar() 无参时是「重载当前月」，
+   两者语义不同，按钮绑错就一直停在你手动翻到的那一页 */
+function goThisMonth() {
+  const base = (TODAY && TODAY.date) || new Date().toLocaleDateString('sv-SE');
+  loadCalendar(base.slice(0, 7));
 }
 
 /* 年月下拉：直接跳到指定月份 */
