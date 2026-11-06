@@ -105,3 +105,13 @@ CREATE TABLE IF NOT EXISTS daily_plan (
 );
 
 CREATE INDEX IF NOT EXISTS idx_plan_date ON daily_plan(plan_date, slot);
+
+-- 分散操作留痕：把一个日期上超量的题挪到后面的空天，可整批撤回
+CREATE TABLE IF NOT EXISTS disperse_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id   TEXT NOT NULL,
+    problem_id INTEGER NOT NULL REFERENCES problem(id) ON DELETE CASCADE,
+    from_date  TEXT NOT NULL,
+    to_date    TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);

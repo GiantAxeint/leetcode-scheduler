@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import config
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 DEFAULT_SETTINGS = {
     "queue_limit": "15",          # 在途：当月要复习的不同题目上限（同一题多次复习算 1）
@@ -213,6 +213,21 @@ def migrate(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE review_log ADD COLUMN next_due_before TEXT")
         if "solved_before" not in cols:
             conn.execute("ALTER TABLE review_log ADD COLUMN solved_before INTEGER")
+    if version < 9:
+        # 日历上的「分散」要能整批撤回，得记住每题从哪天挪到了哪天
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS disperse_log (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                batch_id   TEXT NOT NULL,
+                problem_id INTEGER NOT NULL REFERENCES problem(id) ON DELETE CASCADE,
+                from_date  TEXT NOT NULL,
+                to_date    TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_disperse_batch ON disperse_log(batch_id);
+            """
+        )
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 

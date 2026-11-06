@@ -783,7 +783,7 @@ function renderCalendar() {
       cls.push(list.length <= cap ? 'q1' : list.length <= cap * 2 ? 'q2' : 'q3');
     }
     if (list.length > cap) cls.push('over');
-    cells += `<div class="${cls.join(' ')}" data-date="${iso}">
+    cells += `<div class="${cls.join(' ')}" data-date="${iso}" onclick="openDay('${iso}')">
       <div class="cal-d">${day}</div>
       ${list.length ? `<div class="cal-n">${list.length}</div>` : ''}
     </div>`;
@@ -808,12 +808,63 @@ function renderCalendar() {
       <button class="btn ghost" onclick="loadCalendar()">本月</button>
       <button class="btn ghost" onclick="stepMonth(1)">下一月</button>
     </div>
+    ${d.last_disperse ? `<div class="row" style="margin-bottom:10px">
+      <span class="muted">上次分散 ${d.last_disperse.count} 道 · ${d.last_disperse.at.slice(5, 16)}</span>
+      <button class="btn ghost" onclick="undoSpread('${d.last_disperse.batch}')">撤回</button>
+    </div>` : ''}
     <div class="panel"><div class="cal-grid">${head}${cells}</div></div>
     <div class="muted" style="margin-top:10px;font-size:12px">
       只列在途题（候补不算）。数字是「那天到期几道」，实际排进班次还要看每日容量。
     </div>
     <div id="cal-tip" class="cal-tip" hidden></div>`;
   bindCalTip();
+}
+
+/* 点某天：看当天题目，超容量时给「分散」入口 */
+function openDay(iso) {
+  const list = (CAL.data.days[iso] || []);
+  const cap = CAL.data.capacity || 6;
+  const over = list.length - cap;
+  const quota = over > 0 ? Math.min(Math.max(1, Math.floor(list.length / 3)), over) : 0;
+  const rows = list.map((p) => `
+    <div class="recent-row">
+      <span><b style="font-weight:500">${titleLink(p.title, p)}</b>
+        <span class="muted">${[p.leetcode_id ? '#' + p.leetcode_id : '',
+          p.stage ? 'S' + p.stage : '新题', p.difficulty || ''].filter(Boolean).join(' · ')}</span></span>
+    </div>`).join('');
+  modal(`
+    <div class="row" style="margin-bottom:10px">
+      <h2 style="margin:0;font-size:17px;font-weight:500">${iso}</h2>
+      <span class="muted">${list.length} 道 · 容量 ${cap}</span>
+    </div>
+    ${rows || '<div class="muted" style="padding:8px 2px">这天没有题</div>'}
+    <div class="row end" style="margin-top:16px">
+      ${quota > 0 ? `<button class="btn primary" onclick="spreadDay('${iso}')">分散 ${quota} 道到后面</button>` : ''}
+      <button class="btn" onclick="closeModal()">关闭</button>
+    </div>`);
+}
+
+async function spreadDay(iso) {
+  try {
+    const r = await api('/calendar/disperse', { method: 'POST', body: { date: iso } });
+    closeModal();
+    const where = Object.entries(r.spread)
+      .map(([d, n]) => `${d.slice(5)}×${n}`).join('、');
+    toast(`分散了 ${r.moved} 道 → ${where}`);
+    await loadCalendar();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function undoSpread(batch) {
+  try {
+    const r = await api('/calendar/disperse/undo', { method: 'POST', body: { batch } });
+    toast(`已撤回，${r.restored} 道回到原日期`);
+    await loadCalendar();
+  } catch (e) {
+    toast(e.message);
+  }
 }
 
 /* 年月下拉：直接跳到指定月份 */

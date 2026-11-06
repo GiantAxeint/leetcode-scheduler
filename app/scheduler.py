@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from . import db
 
@@ -256,6 +256,93 @@ def recycle_stale(conn: sqlite3.Connection, today: str | None = None, days: int 
     conn.commit()
     refill(conn, exclude=ids)
     return len(ids)
+
+
+def _day_count(conn: sqlite3.Connection, iso: str) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) c FROM problem WHERE phase='active' AND next_due=?", (iso,)
+    ).fetchone()["c"]
+
+
+def _next_free_day(conn: sqlite3.Connection, after: str, cap: int, span: int = 90) -> str | None:
+    """从 after 的次日开始，找第一个没满容量的工作日。"""
+    d = date.fromisoformat(after)
+    for _ in range(span):
+        d += timedelta(days=1)
+        if not is_workday(d):
+            continue
+        iso = d.isoformat()
+        if _day_count(conn, iso) < cap:
+            return iso
+    return None
+
+
+def disperse_day(conn: sqlite3.Connection, day: str, cap: int) -> dict:
+    """把某天超容量的题往后挪。
+
+    只挪三分之一，且优先低档位 —— 高档位的题间隔长，挪一次等于毁掉半个月的节奏。
+    目标日从次日往后找第一个没满的工作日，放满了继续往后。
+    """
+    rows = conn.execute(
+        "SELECT id, stage FROM problem WHERE phase='active' AND next_due=? "
+        "ORDER BY stage ASC, id DESC",
+        (day,),
+    ).fetchall()
+    n = len(rows)
+    if n <= cap:
+        return {"ok": False, "reason": f"这天 {n} 道，没超容量 {cap}"}
+
+    quota = max(1, n // 3)      # 最多挪三分之一
+    need = n - cap              # 至少挪这么多才降到容量内
+    count = min(quota, need)
+
+    batch = datetime.now().strftime("%Y%m%d%H%M%S%f")[:18]
+    moves: list[dict] = []
+    cursor = day
+    for r in rows[:count]:
+        target = _next_free_day(conn, cursor, cap)
+        if target is None:
+            break
+        conn.execute("UPDATE problem SET next_due=? WHERE id=?", (target, r["id"]))
+        conn.execute(
+            "INSERT INTO disperse_log(batch_id, problem_id, from_date, to_date) "
+            "VALUES(?,?,?,?)",
+            (batch, r["id"], day, target),
+        )
+        moves.append({"id": r["id"], "to": target})
+        cursor = target
+    conn.commit()
+
+    if not moves:
+        return {"ok": False, "reason": "往后 90 天都没有空位"}
+
+    spread: dict[str, int] = {}
+    for m in moves:
+        spread[m["to"]] = spread.get(m["to"], 0) + 1
+    return {"ok": True, "batch": batch, "moved": len(moves), "spread": spread}
+
+
+def undo_disperse(conn: sqlite3.Connection, batch: str) -> int:
+    rows = conn.execute(
+        "SELECT problem_id, from_date FROM disperse_log WHERE batch_id=?", (batch,)
+    ).fetchall()
+    for r in rows:
+        conn.execute(
+            "UPDATE problem SET next_due=? WHERE id=?", (r["from_date"], r["problem_id"])
+        )
+    conn.execute("DELETE FROM disperse_log WHERE batch_id=?", (batch,))
+    conn.commit()
+    return len(rows)
+
+
+def last_disperse(conn: sqlite3.Connection) -> dict | None:
+    row = conn.execute(
+        "SELECT batch_id, COUNT(*) n, MAX(created_at) at FROM disperse_log "
+        "GROUP BY batch_id ORDER BY at DESC LIMIT 1"
+    ).fetchone()
+    if not row:
+        return None
+    return {"batch": row["batch_id"], "count": row["n"], "at": row["at"]}
 
 
 def backlog_problems(conn: sqlite3.Connection, today: str | None = None) -> list[sqlite3.Row]:

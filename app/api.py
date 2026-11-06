@@ -224,8 +224,35 @@ def create_app(root: Path | None = None) -> Flask:
                 "capacity": db.get_int(c, "daily_capacity", 6),
                 "today": scheduler.today_str(),
                 "days": days,
+                "last_disperse": scheduler.last_disperse(c),
             }
         )
+
+    @app.post("/api/calendar/disperse")
+    def api_calendar_disperse():
+        """把某天超容量的题往后挪三分之一，可整批撤回。"""
+        b = request.get_json(force=True) or {}
+        day = (b.get("date") or "").strip()
+        try:
+            date.fromisoformat(day)
+        except ValueError:
+            return jsonify({"error": "date 格式应为 YYYY-MM-DD"}), 400
+        c = conn()
+        cap = db.get_int(c, "daily_capacity", 6)
+        res = scheduler.disperse_day(c, day, cap)
+        if not res.get("ok"):
+            return jsonify(res), 400
+        return jsonify(res)
+
+    @app.post("/api/calendar/disperse/undo")
+    def api_calendar_disperse_undo():
+        b = request.get_json(force=True) or {}
+        batch = (b.get("batch") or "").strip()
+        if not batch:
+            return jsonify({"error": "缺 batch"}), 400
+        c = conn()
+        n = scheduler.undo_disperse(c, batch)
+        return jsonify({"ok": True, "restored": n})
 
     # ---------- 壁纸 ----------
     @app.get("/api/wallpaper")
