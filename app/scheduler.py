@@ -278,7 +278,8 @@ def _next_free_day(conn: sqlite3.Connection, after: str, cap: int, span: int = 9
 
 
 def disperse_day(conn: sqlite3.Connection, day: str, cap: int,
-                 ids: list[int] | None = None, target: str | None = None) -> dict:
+                 ids: list[int] | None = None, target: str | None = None,
+                 targets: list[str] | None = None) -> dict:
     """把某天的题往后挪。
 
     两种用法：
@@ -309,12 +310,15 @@ def disperse_day(conn: sqlite3.Connection, day: str, cap: int,
     if not picks:
         return {"ok": False, "reason": "没有可分散的题"}
 
+    # 指定了目标日就按顺序轮流放（选多个日期时均摊），没指定就自动往后找
+    seq = sorted(set(targets)) if targets else ([target] if target else [])
+
     batch = datetime.now().strftime("%Y%m%d%H%M%S%f")[:18]
     moves: list[dict] = []
     cursor = day
-    for r in picks:
-        if target:
-            to = target
+    for i, r in enumerate(picks):
+        if seq:
+            to = seq[i % len(seq)]
         else:
             to = _next_free_day(conn, cursor, cap)
             if to is None:

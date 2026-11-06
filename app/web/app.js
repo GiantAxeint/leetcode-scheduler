@@ -853,7 +853,7 @@ function toggleDayPick(id, on) {
 }
 
 let SPREAD_SRC = null;
-let SPREAD_PICK = { month: null, date: null, days: {}, cap: 6 };
+let SPREAD_PICK = { month: null, dates: new Set(), days: {}, cap: 6 };
 
 function confirmSpread() {
   const { iso, ids } = DAY_PICK;
@@ -862,7 +862,7 @@ function confirmSpread() {
     return;
   }
   SPREAD_SRC = iso;
-  SPREAD_PICK = { month: iso.slice(0, 7), date: null, days: CAL.data.days, cap: CAL.data.capacity || 6 };
+  SPREAD_PICK = { month: iso.slice(0, 7), dates: new Set(), days: CAL.data.days, cap: CAL.data.capacity || 6 };
   drawSpreadPick();
 }
 
@@ -882,7 +882,7 @@ function drawSpreadPick() {
     const cls = ['pick-cell'];
     if (cnt) cls.push('has');
     if (cnt > SPREAD_PICK.cap) cls.push('over');
-    if (iso === SPREAD_PICK.date) cls.push('on');
+    if (SPREAD_PICK.dates.has(iso)) cls.push('on');
     if (iso === SPREAD_SRC) cls.push('src');
     cells += `<div class="${cls.join(' ')}" onclick="pickTarget('${iso}')">
       <span class="pd">${d}</span>${cnt ? `<span class="pn">${cnt}</span>` : ''}
@@ -892,15 +892,19 @@ function drawSpreadPick() {
   modal(`
     <h2 style="margin:0 0 10px;font-size:17px;font-weight:500">是否真的要分散这些题目？</h2>
     <div class="muted" style="margin-bottom:12px">
-      从 ${SPREAD_SRC} 分散 ${DAY_PICK.ids.size} 道${
-        SPREAD_PICK.date ? ` → ${SPREAD_PICK.date}` : '（没选目标就自动往后找空天）'}
+      从 ${SPREAD_SRC} 分散 ${DAY_PICK.ids.size} 道${(() => {
+        const ds = [...SPREAD_PICK.dates].sort();
+        return ds.length
+          ? ` → ${ds.map((d) => d.slice(5)).join('、')}`
+          : '（没选目标就自动往后找空天）';
+      })()}
     </div>
     <div class="row" style="margin-bottom:8px">
       <button class="btn ghost" onclick="stepPick(-1)">上一月</button>
       <b style="font-size:13px">${y} 年 ${m} 月</b>
       <button class="btn ghost" onclick="stepPick(1)">下一月</button>
       <div class="spacer"></div>
-      ${SPREAD_PICK.date ? '<button class="btn ghost" onclick="clearPick()">清除</button>' : ''}
+      ${SPREAD_PICK.dates.size ? '<button class="btn ghost" onclick="clearPick()">清除全部</button>' : ''}
     </div>
     <div class="pick-grid">${head}${cells}</div>
     <div class="row end" style="margin-top:16px">
@@ -914,12 +918,13 @@ function pickTarget(iso) {
     toast('不能挪回同一天');
     return;
   }
-  SPREAD_PICK.date = SPREAD_PICK.date === iso ? null : iso;
+  if (SPREAD_PICK.dates.has(iso)) SPREAD_PICK.dates.delete(iso);
+  else SPREAD_PICK.dates.add(iso);
   drawSpreadPick();
 }
 
 function clearPick() {
-  SPREAD_PICK.date = null;
+  SPREAD_PICK.dates.clear();
   drawSpreadPick();
 }
 
@@ -944,11 +949,11 @@ async function stepPick(delta) {
 
 async function doSpread() {
   const { ids } = DAY_PICK;
-  const target = SPREAD_PICK.date || null;
+  const targets = [...SPREAD_PICK.dates].sort();
   try {
     const r = await api('/calendar/disperse', {
       method: 'POST',
-      body: { date: SPREAD_SRC, problem_ids: [...ids], target },
+      body: { date: SPREAD_SRC, problem_ids: [...ids], targets },
     });
     closeModal();
     const where = Object.entries(r.spread)

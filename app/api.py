@@ -246,7 +246,22 @@ def create_app(root: Path | None = None) -> Flask:
         except ValueError:
             return jsonify({"error": "date 格式应为 YYYY-MM-DD"}), 400
         target = (b.get("target") or "").strip() or None
-        if target:
+        targets = b.get("targets")
+        if targets is not None and not isinstance(targets, list):
+            return jsonify({"error": "targets 应为数组"}), 400
+        if targets:
+            cleaned = set()
+            for t in targets:
+                t = str(t).strip()
+                try:
+                    date.fromisoformat(t)
+                except ValueError:
+                    return jsonify({"error": f"日期不合法：{t}"}), 400
+                if t == day:
+                    return jsonify({"error": "目标日期不能是源日期"}), 400
+                cleaned.add(t)
+            targets = sorted(cleaned)
+        elif target:
             try:
                 date.fromisoformat(target)
             except ValueError:
@@ -258,7 +273,11 @@ def create_app(root: Path | None = None) -> Flask:
             return jsonify({"error": "problem_ids 应为数组"}), 400
         c = conn()
         cap = db.get_int(c, "daily_capacity", 6)
-        res = scheduler.disperse_day(c, day, cap, ids=ids, target=target)
+        res = scheduler.disperse_day(
+            c, day, cap, ids=ids,
+            target=target or (targets[0] if targets and len(targets) == 1 else None),
+            targets=targets,
+        )
         if not res.get("ok"):
             return jsonify(res), 400
         return jsonify(res)
