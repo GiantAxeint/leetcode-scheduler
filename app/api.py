@@ -453,6 +453,14 @@ def create_app(root: Path | None = None) -> Flask:
             stage_to, next_due, out_pool = scheduler.advance(
                 stage_from, correct, lapse, fuzz
             )
+
+        # 落库前避让：同档位的题会算出同一天，一天只排得下 daily_capacity 道，
+        # 挤进去的只能进 backlog。这里挪到最近一个有空位的日子。
+        # 只管「复习算出来的日期」；新题（stage=0 首次入池）不在这儿，挪走会让当天没题做。
+        if next_due and not out_pool:
+            cap = max(1, db.get_int(c, "daily_capacity", 6))
+            next_due = scheduler.fit_due(c, next_due, cap, exclude_id=pid)
+
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         c.execute(

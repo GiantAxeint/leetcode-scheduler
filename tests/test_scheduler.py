@@ -244,3 +244,41 @@ def test_recycle_does_not_pull_itself_back(conn):
     scheduler.recycle_stale(conn, WORKDAY)
     row = conn.execute("SELECT phase FROM problem WHERE id=?", (pid,)).fetchone()
     assert row["phase"] == "queued"
+
+
+# ---------- 自动避让（fit_due） ----------
+# 2026-11-02 周一、11-06 周五、11-09 周一，都是工作日
+
+def test_fit_due_keeps_day_when_room(conn):
+    assert scheduler.fit_due(conn, "2026-11-02", 6) == "2026-11-02"
+
+
+def test_fit_due_moves_to_next_day_when_full(conn):
+    scheduler.set_skip_weekend(True)
+    _add_problem(conn, "占位", stage=2, next_due="2026-11-02")
+    assert scheduler.fit_due(conn, "2026-11-02", 1) == "2026-11-03"
+
+
+def test_fit_due_skips_weekend(conn):
+    """周五满了，下一站是周一，不是周六。"""
+    scheduler.set_skip_weekend(True)
+    _add_problem(conn, "占位", stage=2, next_due="2026-11-06")
+    assert scheduler.fit_due(conn, "2026-11-06", 1) == "2026-11-09"
+
+
+def test_fit_due_does_not_count_itself(conn):
+    """提前复习时新日期可能等于自己的旧日期，不摘出去就会自己挤自己。"""
+    pid = _add_problem(conn, "自己", stage=2, next_due="2026-11-02")
+    assert scheduler.fit_due(conn, "2026-11-02", 1, exclude_id=pid) == "2026-11-02"
+
+
+def test_fit_due_gives_up_instead_of_pushing_far(conn):
+    """全都满了就原样返回：宁可超量，也不要推到一个月后。"""
+    db.set_setting(conn, "daily_capacity", 0)
+    assert scheduler.fit_due(conn, "2026-11-02", 0) == "2026-11-02"
+
+
+def test_fit_due_ignores_queued(conn):
+    """候补题不占名额，它还没参与排期。"""
+    _add_problem(conn, "候补", stage=2, next_due="2026-11-02", phase="queued")
+    assert scheduler.fit_due(conn, "2026-11-02", 1) == "2026-11-02"

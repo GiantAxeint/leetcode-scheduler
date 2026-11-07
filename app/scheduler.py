@@ -272,10 +272,42 @@ def recycle_stale(conn: sqlite3.Connection, today: str | None = None, days: int 
     return len(ids)
 
 
+def day_load(conn: sqlite3.Connection, iso: str, exclude_id: int | None = None) -> int:
+    """某天已经压了几道在途题。exclude_id 用于「把自己摘出去再数」。"""
+    sql = "SELECT COUNT(*) c FROM problem WHERE phase='active' AND next_due=?"
+    args: list = [iso]
+    if exclude_id is not None:
+        sql += " AND id<>?"
+        args.append(exclude_id)
+    return conn.execute(sql, args).fetchone()["c"]
+
+
+def fit_due(conn: sqlite3.Connection, iso: str, cap: int,
+            exclude_id: int | None = None, max_shift: int = 30) -> str:
+    """把算出来的到期日落到一个没满的日子上，写库之前调用。
+
+    为什么需要：同档位的题会算出同一个日期（S1 的几道全落 11-09），而一天只排
+    得下 daily_capacity 道，多出来的只能进 backlog —— 用户看到的是「到期了但今天
+    不让做」。判定完当场把它挪到最近一个有空位的日子，比事后手动分散省事。
+
+    边界：
+      - 只看 phase='active'，候补题不占名额
+      - exclude_id 摘掉自己：提前复习时新日期可能等于原到期日，不摘会自己挤自己
+      - 找不到空位就原样返回。宁可那天超量，也不能把题推到一个月后 —— 推到
+        一个月后等于这道题放假，比超量更糟
+    """
+    if not iso:
+        return iso
+    d = date.fromisoformat(iso)
+    for _ in range(max_shift + 1):
+        if is_workday(d) and day_load(conn, d.isoformat(), exclude_id) < cap:
+            return d.isoformat()
+        d += timedelta(days=1)
+    return iso
+
+
 def _day_count(conn: sqlite3.Connection, iso: str) -> int:
-    return conn.execute(
-        "SELECT COUNT(*) c FROM problem WHERE phase='active' AND next_due=?", (iso,)
-    ).fetchone()["c"]
+    return day_load(conn, iso)
 
 
 def _next_free_day(conn: sqlite3.Connection, after: str, cap: int, span: int = 90) -> str | None:
