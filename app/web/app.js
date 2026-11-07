@@ -27,7 +27,10 @@ function diffClass(d) {
   if (/简单|easy/i.test(s)) return 'd-easy';
   if (/中等|medium/i.test(s)) return 'd-medium';
   if (/困难|hard/i.test(s)) return 'd-hard';
-  return '';
+  // 难度缺失（多为扩展抓取时页面还没渲染完）：给 d-unknown，
+  // 让标题落到灰色点线样式。返回空串会退化成 color:inherit，看着像普通正文，
+  // 数据缺了也看不出来 —— 之前就是这么「变黑」的。
+  return 'd-unknown';
 }
 
 function titleLink(text, o) {
@@ -1692,6 +1695,10 @@ async function loadSettings() {
       </div>
       <label class="field"><span>间隔阶梯（档位基数，天数，逗号分隔）</span>
         <input id="s-intervals" value="${st.intervals.join(',')}"></label>
+      <label class="row" style="gap:8px;align-items:center;margin:2px 0 12px">
+        <input id="s-skip-weekend" type="checkbox" style="width:auto"${String(st.skip_weekend) === '1' ? ' checked' : ''}>
+        <span>跳过周末（取消勾选后，周六周日也排复习，日期不再顺延到下周一）</span>
+      </label>
       <button class="btn primary" onclick="saveSettings()">保存</button>
     </div>
     <div class="panel" style="margin-bottom:16px">
@@ -1733,6 +1740,7 @@ async function saveSettings() {
     queue_limit: $('#s-queue').value,
     daily_minutes: $('#s-minutes').value,
     interval_days: $('#s-intervals').value,
+    skip_weekend: $('#s-skip-weekend').checked ? '1' : '0',
   };
   await api('/settings', { method: 'PUT', body });
   toast('已保存');

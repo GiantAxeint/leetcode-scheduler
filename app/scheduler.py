@@ -10,18 +10,32 @@ from . import db
 
 INTERVALS = [1, 3, 7, 15, 30]   # stage 1..5 对应的天数
 
+# 是否跳过周末。True = 旧行为：周末不排班，复习日期落到周末就顺延到下周一。
+# False = 周六周日也算可复习日，周末照常生成当天计划。
+# 由 api 层在每次建连时同步（见 api.create_app 里的 conn）。
+_SKIP_WEEKEND = True
+
 
 def today_str() -> str:
     return date.today().isoformat()
 
 
 def due_date() -> str:
-    """新题该从哪天开始：周末录的题算下周一。"""
+    """新题该从哪天开始：默认周末录的题算下周一，关掉 skip_weekend 就按当天。"""
     return next_workday(date.today()).isoformat()
 
 
 def is_workday(d: date) -> bool:
+    """当天能不能排复习。skip_weekend 关掉后，一周七天都算。"""
+    if not _SKIP_WEEKEND:
+        return True
     return d.weekday() < 5          # 0=周一 … 4=周五
+
+
+def set_skip_weekend(flag: bool) -> None:
+    """由 api 层按设置项同步，避免每个调用点都往下传配置。"""
+    global _SKIP_WEEKEND
+    _SKIP_WEEKEND = bool(flag)
 
 
 def next_workday(d: date) -> date:
@@ -31,7 +45,7 @@ def next_workday(d: date) -> date:
 
 
 def add_days(n: int, base: str | None = None) -> str:
-    """往后推 n 天，落到周六周日就顺延到下一个工作日。"""
+    """往后推 n 天。默认落到周六周日就顺延到下一个工作日（skip_weekend=False 时不顺延）。"""
     d = date.fromisoformat(base) if base else date.today()
     return next_workday(d + timedelta(days=n)).isoformat()
 
@@ -194,7 +208,7 @@ def gate(conn: sqlite3.Connection) -> dict:
 
 
 def build_plan(conn: sqlite3.Connection, today: str | None = None) -> None:
-    """当天计划只生成一次。周末不排班。
+    """当天计划只生成一次。默认周末不排班，skip_weekend 关掉后周末也排。
 
     容量按「天」算：daily_capacity 决定一天总共排几道，早/午/晚只是把总量切开
     —— 新题优先早班，剩下的名额由到期题补，再均分给午、晚。

@@ -208,6 +208,22 @@ def test_build_plan_skips_weekend(conn):
     assert conn.execute("SELECT COUNT(*) c FROM daily_plan").fetchone()["c"] == 0
 
 
+def test_skip_weekend_off_allows_weekend(conn):
+    """关掉 skip_weekend：周六也算可复习日，日期不再顺延到周一。"""
+    from datetime import date
+
+    scheduler.set_skip_weekend(False)
+    try:
+        assert scheduler.is_workday(date(2026, 10, 31))            # 周六
+        assert scheduler.add_days(1, "2026-10-30") == "2026-10-31"
+        _add_problem(conn, "周末题", stage=2, next_due="2026-10-31")
+        scheduler.build_plan(conn, "2026-10-31")
+        assert conn.execute("SELECT COUNT(*) c FROM daily_plan").fetchone()["c"] == 1
+    finally:
+        # 这是模块级开关，别把状态漏给后面的用例
+        scheduler.set_skip_weekend(True)
+
+
 def test_recycle_stale_returns_to_queue(conn):
     from datetime import date, timedelta
 

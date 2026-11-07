@@ -55,9 +55,17 @@
     if (/^(思路|题解|提交记录|题目描述|讨论|评论)$/.test(title)) title = '';
     title = title.replace(/\s*-\s*力扣.*$/, '').replace(/^\d+\.\s*/, '').trim();
 
+    // 难度：力扣换过几版 class，而且题目页是分段渲染的，单一选择器会抓空
+    //（3439 就是这么漏成空串、标题变成普通黑色的）。这里多候选依次试，
+    // 再用「文本很短」把误匹配到的大容器滤掉。
     let difficulty = '';
-    const dEl = document.querySelector('[class*="text-difficulty-"]');
-    const dText = dEl ? dEl.textContent.trim() : '';
+    const dText = [
+      '[class*="text-difficulty-"]',
+      '[data-e2e-locator="question-difficulty"]',
+    ]
+      .flatMap((sel) => [...document.querySelectorAll(sel)])
+      .map((el) => el.textContent.trim())
+      .find((t) => t && t.length <= 6) || '';
     if (/简单|Easy/i.test(dText)) difficulty = '简单';
     else if (/中等|Medium/i.test(dText)) difficulty = '中等';
     else if (/困难|Hard/i.test(dText)) difficulty = '困难';

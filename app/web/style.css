@@ -476,6 +476,13 @@ body.wall-on .top {
 .plink.d-medium:hover { color: #8f6100; border-bottom-color: #8f6100; }
 .plink.d-hard, .plain.d-hard { color: #dd2247; border-bottom-color: #ffb3c2; }
 .plink.d-hard:hover { color: #b01538; border-bottom-color: #b01538; }
+/* 难度没录进来：灰色 + 点线，一眼看出是数据缺，而不是「这题没有难度」 */
+.plink.d-unknown, .plain.d-unknown {
+  color: #6f6d66;
+  border-bottom-color: #d8d6cd;
+  border-bottom-style: dotted;
+}
+.plink.d-unknown:hover { color: #4a4842; border-bottom-color: #8a877e; }
 
 /* 难度列的圆点，跟标题同色系 */
 .dif {

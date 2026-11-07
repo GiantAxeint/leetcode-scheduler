@@ -48,6 +48,9 @@ def create_app(root: Path | None = None) -> Flask:
                     if root not in _INITED:
                         db.init(g.db)
                         _INITED.add(root)
+            # 调度开关是模块级状态（scheduler._SKIP_WEEKEND），每个请求开头同步一次：
+            # 设置页改完立刻生效，不用重启。
+            scheduler.set_skip_weekend(db.get_int(g.db, "skip_weekend", 1) != 0)
         return g.db
 
     @app.errorhandler(Exception)
