@@ -1118,6 +1118,8 @@ def create_app(root: Path | None = None) -> Flask:
         for k, v in b.items():
             if k in db.DEFAULT_SETTINGS:
                 db.set_setting(c, k, v)
+        # 保存后立刻同步，别等下一次请求才认
+        scheduler.set_skip_weekend(db.get_int(c, "skip_weekend", 1) != 0)
         return jsonify({"settings": _settings_payload(c)})
 
     # ---------- 数据根迁移 ----------
