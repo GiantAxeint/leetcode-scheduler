@@ -10,6 +10,11 @@ from . import config
 SCHEMA_VERSION = 9
 
 DEFAULT_SETTINGS = {
+    # [甲版批注] 这个 15 只是「新库的初始值」，别拿它当当前配置。
+    # 用户机器上的库里是 36（写在 settings 表里），是他按每天 3 道新题倒推出来的：
+    # 名额 36 时每天到期约 3.7 道，整体控制在 1.5 小时内。
+    # 我在交接文档里写过「在途（名额 36）」，丙版指出那句有歧义 —— 36 是数据，不是默认。
+    # 用户明确要求保留在界面上手改数量的权限，所以：不要把这个默认值改成 36。
     "queue_limit": "15",          # 在途：当月要复习的不同题目上限（同一题多次复习算 1）
     "inbox_limit": "999",         # 待归纳区不设上限，保留字段做兼容
     "daily_minutes": "90",        # 每日时长上限（分钟）
@@ -24,6 +29,10 @@ DEFAULT_SETTINGS = {
     "noon_due": "2",
     "evening_due": "1",
     "oral_mode": "1",             # 晚班口述模式开关
+    # [甲版批注] oral_mode 是死配置：全仓库没有任何代码读它，只在这里躺着。
+    # 我原来在交接文档里写「晚班只口述不写码只是个标签」，说得太轻 —— 实际情况
+    # 是压根没实现。用户问过这件事，口头说过「只要个情绪价值就行」，没要求真做。
+    # 删不删都行（他倾向保留），但别看到这个键就以为功能存在。
     "total_easy": "1094",         # 题库总数（用于进度环，可改）
     "total_medium": "2334",
     "total_hard": "1056",
@@ -57,6 +66,16 @@ def connect(root: Path | None = None) -> sqlite3.Connection:
 
 
 def init(conn: sqlite3.Connection) -> None:
+    # [甲版批注] 顺序是这个函数唯一的考点：建表 → 灌默认值 → 迁移 → 建索引。
+    # 别动。
+    #
+    # 我在这里挂过一次，全站 500，报错是 no such column: problem_id。
+    # 起因：schema.sql 里给 review_log(problem_id) 建了索引，但 problem_id 这一列
+    # 是 v5 迁移才加上去的。老库 executescript 跑到建索引就炸，异常抛出后
+    # migrate() 根本没执行，于是所有接口全挂 —— 看起来像前端崩了，其实是建库顺序。
+    #
+    # 所以底下那个索引是「迁移之后、判断列存在再建」。以后加任何依赖新列的索引，
+    # 都放这个位置，别图省事写回 schema.sql。
     schema = (Path(__file__).parent / "schema.sql").read_text(encoding="utf-8")
     conn.executescript(schema)
     conn.executescript(

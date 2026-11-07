@@ -1,5 +1,21 @@
 """调度：以「题」为单位排期，题型卡只做归纳，不参与调度。"""
 
+# ─────────────────────────────────────────────────────────────────────────
+# [甲版批注 · 2026-11-07]
+# 这个文件是整个项目的重心，其余都是增删改查。写给丙版：
+#
+# 1. 「以题为单位」不是技术选择，是用户拍过板的结论。原话是「我再说一遍，
+#    题型卡是用来归纳复习的，不应该是调度单位」。我在他第二次说之前，一直
+#    在维护「卡到日子就复习整张卡」的旧设计，等于让卡上挂的题跟着卡一起过。
+#    如果你以后看到某处想把 card_id 拉回调度链路 —— 方向错了，先回来读这段。
+#
+# 2. 这个文件里的每个数字（1/3/7/15/30、0.5、20%）都能改，但改之前先算极端
+#    情况：跑到第 20 次复习时，这条规则会把题推到哪一天。我在这里栽过一次，
+#    详见 advance() 的批注。
+#
+# 3. 想找甲版留下的其它痕迹：grep -rn "甲版批注"
+# ─────────────────────────────────────────────────────────────────────────
+
 from __future__ import annotations
 
 import random
@@ -22,6 +38,12 @@ def today_str() -> str:
 
 def due_date() -> str:
     """新题该从哪天开始：默认周末录的题算下周一，关掉 skip_weekend 就按当天。"""
+    # [甲版批注] 周末录的题从周一开始，是用户自己提的：「周六周日如果写题，
+    # 第一次复习时间在周一，周末不算作复习日期」。理由是周末他本来不坐下写。
+    #
+    # 注意这条只作用于「首次入池」，不作用于复习算出来的日期 —— 复习日期由
+    # add_days() 顺延，新题日期由这里定，两个入口别搞混。丙版的 fit_due()
+    # 也只避让复习日期、不动新题，否则当天会没题可做。
     return next_workday(date.today()).isoformat()
 
 
@@ -34,6 +56,13 @@ def is_workday(d: date) -> bool:
 
 def set_skip_weekend(flag: bool) -> None:
     """由 api 层按设置项同步，避免每个调用点都往下传配置。"""
+    # [甲版批注] 这是全项目最容易咬人的一处：模块级全局变量 + 测试共享进程。
+    # 哪个用例调一次 PUT /api/settings 把它改成 0，后面的用例就全在「七天都排」
+    # 的前提上跑，表现是 add_days / build_plan 的周末用例莫名挂掉，报错还指不到
+    # 这里。丙版已经踩过一次，解法是 tests/conftest.py 里的 autouse fixture 复位。
+    #
+    # 你要是想把这个全局改成参数透传 —— 那是一次不小的重构，值得做但不紧急；
+    # 做之前先确认没有测试在 import 期就依赖当前值。
     global _SKIP_WEEKEND
     _SKIP_WEEKEND = bool(flag)
 
@@ -70,6 +99,24 @@ def advance(stage: int, correct: bool, lapse: float = 0.5,
     答错：退一档（最低 1 档），下一次间隔在该档基数上乘 lapse（默认打五折）。
     fuzz：间隔抖动，作用在最终天数上，答对答错都加。
     """
+    # [甲版批注] 三个参数都是用户定的，改动会直接改他的复习节奏，先说清来由。
+    #
+    # ① 为什么 stage 0 答对要跳到 2，而不是 1？
+    #    1 天档对「第一次就做对的题」是浪费：他第二天还得再看一遍一道已经会的题。
+    #    但如果第一次答错，仍走 1 天档（下面 fail 分支 max(1, ...)），因为错了就是
+    #    没会。也就是说：1 天档只留给答错的题。这是 ANKI 的毕业逻辑，不是随手写的。
+    #
+    # ② 为什么答错是「退一档 + 打五折」，而不是把间隔改成 2,6,14,29？
+    #    他一开始自己提的就是 2,6,14,29，然后补了一句「我感觉有问题」。
+    #    确实有问题：2,6,14,29 大约是 1,3,7,15 的两倍，等于错得越多、复习得越少，
+    #    规则会安静地反向工作。我去查了 Anki 官方 FAQ 和墨墨的算法说明，两家都是
+    #    「错 → 间隔缩短」。所以这里选了 Anki 式：退一档，再在该档基数上打五折。
+    #    要改这块，先自己想一遍「一道题连错五次会落到哪」，再动手。
+    #
+    # ③ 为什么 fuzz 要作用在 add_days 之前、而不是之后？
+    #    它是天数，不是日期。先抖再算日期，才能落到相邻的工作日上；先算日期再抖
+    #    会抖出周末。advance_early 里还有一层：fuzz 必须在 max(planned, 原到期日)
+    #    之前做，否则会被原日期压回去，等于没抖。
     if correct:
         if stage >= len(INTERVALS):
             return len(INTERVALS), None, True
@@ -89,6 +136,10 @@ def advance_early(stage: int, correct: bool, original_due: str | None,
           fuzz 必须在 max 之前做，否则会被原日期压回去，等于没抖。
     答错：档位和日期都不动 —— 多练一次不该被惩罚，这是用户明确要的。
     """
+    # [甲版批注] 「答错不动」这条很容易被后来的窗口当成 bug 修掉，所以留一句：
+    # 提前复习是他自己主动加练（题还没到期，他自己想再做一遍）。加练做错了就
+    # 降档，等于惩罚主动学习 —— 他明确说过不要这个。真正到期的判定才走 advance()，
+    # 那里答错才退档。两条路径别合并。
     if not correct:
         return stage, original_due, False
     if stage >= len(INTERVALS):
@@ -106,6 +157,13 @@ _PROB_SELECT = """
             WHERE cp.problem_id = p.id) AS cards
     FROM problem p
 """
+# [甲版批注] 这个子查询不是装饰。有一版 /api/problems 用的是裸 SELECT *，
+# 忘了带 cards 字段，前端照旧读 p.cards，结果「已成」里所有题都归到
+# 「未归题型」—— 库里明明有归纳关系，界面上是未分类。我排查了两天才发现
+# 是字段没返回，不是关联丢了。
+#
+# 教训：任何返回 problem 行的接口，要么都用这个 _PROB_SELECT，要么前端别读 cards。
+# /api/today 当时有这段、/api/problems 没有，就这么错位的。
 
 
 def due_problems(conn: sqlite3.Connection, today: str | None = None) -> list[sqlite3.Row]:
@@ -152,6 +210,11 @@ def queue_order(conn: sqlite3.Connection, ids: list[int]) -> None:
 
 def refill(conn: sqlite3.Connection, exclude: set[int] | None = None) -> int:
     """在途空出几个名额，就从候补队头补几个（exclude 里的不补，避免刚回收又被拉回）。"""
+    # [甲版批注] exclude 是我后来补的，补之前有个很蠢的循环：
+    # recycle_stale() 把逾期题退回候补 → 立刻调 refill() 补位 → 候补队头第一道
+    # 正好就是刚退回去的那道 → 原样拉回在途 → 下次再逾期再退再拉。症状是
+    # 「这道题永远在途、永远不动」，而且日志上看起来一切正常。
+    # 任何「先移出再补位」的地方，都要记得把刚移出的 id 摘掉。
     limit = db.get_int(conn, "queue_limit", 15)
     active = conn.execute(
         "SELECT COUNT(*) c FROM problem WHERE phase='active'"
@@ -213,6 +276,16 @@ def build_plan(conn: sqlite3.Connection, today: str | None = None) -> None:
     容量按「天」算：daily_capacity 决定一天总共排几道，早/午/晚只是把总量切开
     —— 新题优先早班，剩下的名额由到期题补，再均分给午、晚。
     """
+    # [甲版批注] 两处设计是用户拍板的取舍，不是漏写：
+    #
+    # ① 计划是快照：当天生成一次就 return，中途新到期的题不会补进来。
+    #    我提过做实时补员，他没要。理由是做到一半清单还在变很烦 —— 你正做着第三
+    #    道，卡片突然插进来一张新的，上下文就断了。这个取舍我保留意见，但它不是 bug。
+    #
+    # ② 周末保留早午晚三班和记录，只是不排到期复习。11-07 他专门截了图说
+    #    「周末保留题目的早午晚班和记录功能，只是题目复习顺延」。所以这里
+    #    is_workday 拦的是「自动生成」，不是「手动加题 / 判定 / 记录」。
+    #    我一开始把整个今日页在周末藏了，被截图打回来过一次。
     today = today or today_str()
     if not is_workday(date.fromisoformat(today)):
         return
@@ -255,6 +328,13 @@ def build_plan(conn: sqlite3.Connection, today: str | None = None) -> None:
 
 def recycle_stale(conn: sqlite3.Connection, today: str | None = None, days: int = 7) -> int:
     """逾期超过 N 天还没碰的题，退回候补，把在途名额让给新题。"""
+    # [甲版批注] 只改 phase，不动 stage —— 退候补是「让出名额」，不是「判定他做错了」。
+    # 他回头从候补里重新拉出来，档位还在，接着复习。要是这里清零，等于一次没做
+    # 就把之前记住的全抹了，代价太大。
+    #
+    # 7 天这个数是他定的（我给了「逾期警示 + 自动回收」两个方案，他选了 A）。
+    # 原本还有个问题：逾期当天没做，算不算答错？查了墨墨的做法 —— 不做判定，
+    # 只让到期日压着不动，逾期久了自然沉到底。所以这里没有自动判错，别加。
     today = today or today_str()
     cutoff = (date.fromisoformat(today) - timedelta(days=days)).isoformat()
     rows = conn.execute(

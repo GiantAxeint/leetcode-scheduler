@@ -56,6 +56,12 @@ CREATE TABLE IF NOT EXISTS card_problem (
     PRIMARY KEY (card_id, problem_id)
 );
 
+-- [甲版批注] card_state 不是死表，别删。
+-- 调度单位从「题型卡」换成「题」之后，这张表不再参与今日计划的生成，但仍然服务
+-- 题型卡页面（归档 / 恢复 / 卡片自带的档位展示）。甲版交接文档里说它「变成死表」，
+-- 那句是错的，丙版已当场改正。
+-- 真正的死代码是 app/state.py（全仓库无 import），跟这张表不是一回事。
+-- 想动这张表之前，先看 api.py 里 690-800 那一段。
 CREATE TABLE IF NOT EXISTS card_state (
     card_id      INTEGER PRIMARY KEY REFERENCES pattern_card(id) ON DELETE CASCADE,
     stage        INTEGER NOT NULL DEFAULT 1,

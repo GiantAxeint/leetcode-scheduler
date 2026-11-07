@@ -5,6 +5,15 @@
 从最后一档通过 → 归档出池。
 """
 
+# [甲版批注 · 待删标记]
+# 这个模块已经死了：全仓库没有任何 `import state`，唯一残留是 api.py 顶部那行
+# `from . import ... state ...` 的无用导入。它实现的是「以题型卡为单位」的旧状态机，
+# 调度改到题级之后就没用了。
+#
+# 留着的原因：用户说过「可能有用，保留先不删」。所以别自作主张删，也别拿它当
+# 参考实现 —— 里面的档位语义（pass/hold/fail）和现在 scheduler.advance() 的
+# 二元判定（correct/wrong）不是一套东西，照它写会写岔。
+
 from __future__ import annotations
 
 from dataclasses import dataclass
