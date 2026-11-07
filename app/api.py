@@ -12,7 +12,7 @@ from pathlib import Path
 from flask import Flask, g, jsonify, request, send_file, send_from_directory
 from werkzeug.exceptions import HTTPException
 
-from . import config, db, host, scheduler, state, wallpaper
+from . import config, db, difficulty, host, scheduler, state, wallpaper
 
 # 每个数据根只初始化一次；否则两个并发请求同时建表会撞写锁
 _INIT_LOCK = threading.Lock()
@@ -1112,6 +1112,27 @@ def create_app(root: Path | None = None) -> Flask:
         c.execute("DELETE FROM check_item WHERE id=?", (iid,))
         c.commit()
         return jsonify({"ok": True})
+
+    # ---------- 难度补全 ----------
+    @app.get("/api/difficulty/missing")
+    def api_difficulty_missing():
+        c = conn()
+        items = difficulty.missing(c)
+        return jsonify({"count": len(items), "items": items})
+
+    @app.post("/api/difficulty/refresh")
+    def api_difficulty_refresh():
+        """拉一次 LeetCode 题库清单（约 3–4 秒），把空难度补上。
+
+        网络或解析失败返回 502 而不是 500：前端要能区分「你没网」和「程序崩了」。
+        """
+        c = conn()
+        b = request.get_json(force=True, silent=True) or {}
+        try:
+            res = difficulty.refresh(c, dry_run=bool(b.get("dry_run")))
+        except Exception as e:
+            return jsonify({"error": f"拉取题库失败：{e}"}), 502
+        return jsonify(res)
 
     # ---------- 设置 ----------
     @app.get("/api/settings")

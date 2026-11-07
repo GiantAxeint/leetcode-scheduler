@@ -1644,6 +1644,8 @@ async function loadSettings() {
   // 桌面版才有这两项；浏览器打开时后端返回 mode='headless'，面板降级为只读
   const desktop = await api('/desktop/state');
   const wall = await api('/wallpaper');
+  // 缺难度的题：补全面板要用。查不到就当没有，别让整个设置页跟着挂掉
+  const miss = await api('/difficulty/missing').catch(() => ({ count: 0, items: [] }));
   const wallPanel = `
     <div class="panel" style="margin-bottom:16px">
       <h3>个性化</h3>
@@ -1682,6 +1684,25 @@ async function loadSettings() {
       <span style="flex:1">${esc(c.name)} <span class="muted">${esc(c.hint || '')}</span></span>
       <button class="btn ghost" onclick="dropCheck(${c.id})">移除</button>
     </div>`).join('');
+  // 难度补全：扩展抓 DOM 会抓空，这里从官方题库清单一次性回填
+  const missRows = (miss.items || []).slice(0, 30).map((p) => `
+    <div class="row" style="padding:4px 0;border-bottom:1px solid var(--line);font-size:13px">
+      <span class="muted" style="width:64px">${p.leetcode_id || '—'}</span>
+      <span style="flex:1">${esc(p.title)}</span>
+      <span class="muted">待补</span>
+    </div>`).join('');
+  const diffPanel = `
+    <div class="panel" style="margin-bottom:16px">
+      <h3>难度补全</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:8px">
+        ${miss.count
+          ? `有 ${miss.count} 道题缺难度，标题显示成灰色点线。可以直接从官方题库重新拉一次。`
+          : '所有题的难度都齐了，不用管这里。'}
+      </div>
+      ${missRows ? `<div style="max-height:150px;overflow:auto;margin-bottom:10px">${missRows}</div>` : ''}
+      <button class="btn" onclick="refreshDifficulty(this)"${miss.count ? '' : ' disabled'}>重新抓取难度</button>
+      <span class="muted" id="diff-result" style="font-size:12px;margin-left:10px"></span>
+    </div>`;
   $('#view-settings').innerHTML = `
     <div class="panel" style="margin-bottom:16px">
       <h3>节奏</h3>
@@ -1710,6 +1731,7 @@ async function loadSettings() {
       </div>
       <button class="btn" onclick="saveTotals()">保存总数</button>
     </div>
+    ${diffPanel}
     <div class="panel" style="margin-bottom:16px">
       <h3>检验项</h3>
       ${checkRows || '<div class="muted">没有启用的检验项</div>'}
@@ -1753,6 +1775,28 @@ async function saveTotals() {
     body: { total_easy: $('#s-te').value, total_medium: $('#s-tm').value, total_hard: $('#s-th').value },
   });
   toast('已保存');
+}
+
+/**
+ * 从官方题库清单回填难度。
+ * 一次请求约 3–4 秒，所以先把按钮禁用、写「正在拉取」，别让人以为没反应。
+ * 失败时把原因留在原地（多半是没网或代理），不做成 500 白页。
+ */
+async function refreshDifficulty(btn) {
+  const out = $('#diff-result');
+  if (btn) btn.disabled = true;
+  if (out) out.textContent = '正在拉取题库清单（约 3–4 秒）…';
+  try {
+    const r = await api('/difficulty/refresh', { method: 'POST', body: {} });
+    const bad = r.missed.length;
+    toast(`补全 ${r.fixed.length} 道${bad ? `，${bad} 道题库里没找到` : ''}`);
+    if (out) out.textContent = `检查 ${r.checked} 道：补全 ${r.fixed.length}，未找到 ${bad}`;
+    // 重绘面板，把补完的题从待办列表里去掉。toast 是浮层，不受重绘影响
+    setTimeout(loadSettings, 1200);
+  } catch (e) {
+    if (out) out.textContent = String(e.message || e);
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function saveDesktop() {
