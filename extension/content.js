@@ -38,16 +38,21 @@
     const slug = slugOf();
     if (!slug || slug === 'all') return null;
 
-    let title = textOf('[data-cy="question-title"]') || textOf('h1') || textOf('.text-title-large');
-    if (!title) title = (document.title || '').split(' - ')[0].trim();
-
+    // 标题优先取浏览器标题（形如 "1052. 爱生气的书店老板 - 力扣（LeetCode）"）：
+    // 答题页的 h1 有时候命中的是右侧栏「思路」面板，抓出来就只剩两个字
+    const docTitle = (document.title || '').split(' - ')[0].trim();
+    let title = '';
     let lid = '';
-    const head = document.title.match(/^(\d+)\./);
-    if (head) lid = head[1];
-    if (!lid) {
-      const t = title.match(/^(\d+)\.\s*/);
-      if (t) { lid = t[1]; title = title.replace(/^\d+\.\s*/, ''); }
+    const dm = docTitle.match(/^(\d+)\.\s*(.+)$/);
+    if (dm) {
+      lid = dm[1];
+      title = dm[2].trim();
     }
+    if (!title) {
+      title = textOf('[data-cy="question-title"]') || textOf('.text-title-large') || textOf('h1');
+    }
+    // 万一还是抓到 UI 标签，宁可不填，也别往库里写脏数据
+    if (/^(思路|题解|提交记录|题目描述|讨论|评论)$/.test(title)) title = '';
     title = title.replace(/\s*-\s*力扣.*$/, '').replace(/^\d+\.\s*/, '').trim();
 
     let difficulty = '';
