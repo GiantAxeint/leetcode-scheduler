@@ -565,3 +565,8 @@ th { color: var(--sub); font-weight: 500; font-size: 12px; }
 .pick-cell.on { outline: 2px solid var(--blue); outline-offset: -2px; background: #eaf1fd; }
 .pick-cell .pd { font-size: 12px; color: #4a4843; }
 .pick-cell .pn { position: absolute; right: 5px; bottom: 2px; font-size: 11px; color: var(--hint); }
+
+/* 难度三色 */
+.d-easy { color: #1a7f37; }
+.d-medium { color: #9a6700; }
+.d-hard { color: #b42318; }

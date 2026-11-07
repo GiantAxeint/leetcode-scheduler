@@ -64,6 +64,13 @@ function toast(msg) {
   t._timer = setTimeout(() => t.classList.add('hidden'), 2400);
 }
 
+/* 难度三色：简单绿、中等褐、困难红 */
+function diffTag(d) {
+  if (!d) return '';
+  const cls = d === '简单' ? 'd-easy' : d === '困难' ? 'd-hard' : 'd-medium';
+  return `<span class="${cls}">${esc(d)}</span>`;
+}
+
 function modal(html, wide = false) {
   const box = $('#modal-box');
   box.classList.toggle('wide', !!wide);   // 代码类弹窗要横向空间
@@ -827,7 +834,7 @@ function openDay(iso) {
       <span class="day-meta">
         <span>${titleLink(p.title, p)}</span>
         <span class="muted">${[p.leetcode_id ? '#' + p.leetcode_id : '',
-          p.stage ? 'S' + p.stage : '新题', p.difficulty || ''].filter(Boolean).join(' · ')}</span>
+          p.stage ? 'S' + p.stage : '新题', p.difficulty ? diffTag(p.difficulty) : ''].filter(Boolean).join(' · ')}</span>
       </span>
     </label>`).join('');
 
@@ -1036,7 +1043,7 @@ function bindCalTip() {
         <span class="muted">${[
           p.leetcode_id ? '#' + p.leetcode_id : '',
           p.stage ? 'S' + p.stage : '新题',
-          p.difficulty || '',
+          p.difficulty ? diffTag(p.difficulty) : '',
         ].filter(Boolean).join(' · ')}</span>
       </div>`).join('')}`;
     tip.hidden = false;
